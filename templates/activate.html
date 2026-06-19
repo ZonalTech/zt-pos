@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Activate{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <section class="panel login-panel" style="max-width:520px">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" class="login-logo" alt="">
+    <h1>Activate {{ STORE_NAME }}</h1>
+    <p class="muted" style="margin-top:-.4rem">
+      This copy isn't licensed yet, so all features are locked. Send your
+      <strong>Machine ID</strong> to your supplier to get a license key.
+    </p>
+
+    {% if status and not status.licensed and status.payload %}
+      <p class="muted small" style="color:var(--danger,#c0392b)">{{ status.reason }}</p>
+    {% endif %}
+
+    <label>Your Machine ID</label>
+    <div style="display:flex;gap:.5rem;align-items:center">
+      <input id="machine-id" type="text" readonly value="{{ status.machine_id }}"
+             style="font-family:monospace;letter-spacing:1px;text-align:center;font-weight:600">
+      <button type="button" class="btn" id="copy-id" title="Copy">Copy</button>
+    </div>
+
+    <form method="post" action="{{ url_for('activate') }}" style="margin-top:1rem">
+      <label>Paste your license key</label>
+      <textarea name="license" rows="6" required
+                placeholder="-----BEGIN ZT-POS LICENSE-----&#10;…&#10;-----END ZT-POS LICENSE-----"
+                style="width:100%;font-family:monospace;font-size:.8rem;resize:vertical">{{ pasted or '' }}</textarea>
+      <button class="btn btn-primary btn-lg" type="submit" style="width:100%;margin-top:.6rem">
+        Activate
+      </button>
+    </form>
+  </section>
+</div>
+<script>
+  (function () {
+    var btn = document.getElementById("copy-id");
+    var inp = document.getElementById("machine-id");
+    if (!btn || !inp) return;
+    btn.addEventListener("click", function () {
+      inp.select();
+      var done = function () {
+        var old = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = old; }, 1500);
+      };
+      try {
+        navigator.clipboard.writeText(inp.value).then(done, function () {
+          document.execCommand("copy"); done();
+        });
+      } catch (e) { document.execCommand("copy"); done(); }
+    });
+  })();
+</script>
+{% endblock %}

@@ -8,6 +8,12 @@ __pycache__/
 # Uploaded product images (runtime data)
 uploads/
 
+# Installed license (per-machine runtime file, like .env)
+license.key
+# Private signing keys / issued licenses must never be committed
+*-private-key.txt
+*.lic
+
 # Build artifacts
 setup/
 build/
@@ -19,3 +25,7 @@ release/*.zip
 # Dev/server runtime output
 release/*.err
 release/*.out
+
+# zonal CLI runtime state + local DB backups
+.zonal/
+backups/

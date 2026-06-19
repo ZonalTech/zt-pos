@@ -27,6 +27,7 @@ from models import (
 import rates as fx
 import payments as pay
 import updates
+import license as lic
 
 
 def create_app():
@@ -39,6 +40,21 @@ def create_app():
     )
     app.config.from_object(Config)
     db.init_app(app)
+
+    # License gate: until a valid license is installed, every page and API is
+    # blocked and the app shows only the activation screen — so an unlicensed
+    # POS has all features disabled. Runs first, before auth, and needs no DB.
+    @app.before_request
+    def enforce_license():
+        # The activation screen and static assets must stay reachable so the
+        # customer can read their Machine ID and paste in a license.
+        if request.endpoint in ("activate", "static"):
+            return
+        if lic.is_licensed():
+            return
+        if request.path.startswith("/api/"):
+            return jsonify({"ok": False, "error": "POS is not licensed."}), 403
+        return redirect(url_for("activate"))
 
     # Resolve the logged-in user (and their open shift) once per request.
     @app.before_request
@@ -74,6 +90,7 @@ def create_app():
             APP_VERSION=updates.installed_version(),
             current_user=g.get("user"),
             current_shift=g.get("shift"),
+            LICENSE=lic.status(),
         )
 
     register_routes(app)
@@ -251,6 +268,31 @@ def register_routes(app):
         session.clear()
         flash("Signed out.", "success")
         return redirect(url_for("login"))
+
+    # ------------------------------- Licensing ---------------------------
+    @app.route("/activate", methods=["GET", "POST"])
+    def activate():
+        """Lock screen shown until a valid license is installed.
+
+        GET  shows the Machine ID (to send to the vendor) + a paste box.
+        POST validates the pasted license, saves it on success, then unlocks.
+        """
+        if request.method == "POST":
+            token = request.form.get("license", "")
+            ok, reason, _payload = lic.verify_token(token)
+            if not ok:
+                flash(reason, "error")
+                return render_template(
+                    "activate.html", status=lic.status(force=True), pasted=token
+                ), 400
+            lic.save_license_file(token)
+            lic.status(force=True)   # refresh the cached status now it's valid
+            flash("License activated. Welcome aboard!", "success")
+            return redirect(url_for("login"))
+        # If already licensed, no need to sit on the lock screen.
+        if lic.is_licensed():
+            return redirect(url_for("login"))
+        return render_template("activate.html", status=lic.status(force=True))
 
     # While a user is flagged to change their password, send every page (except
     # the change form and signing out) to the change-password screen.

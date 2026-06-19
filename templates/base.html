@@ -11,6 +11,9 @@
         var t = localStorage.getItem("pos-theme");
         if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         document.documentElement.setAttribute("data-theme", t);
+        // Apply the saved sidebar state before first paint to avoid a flash.
+        if (localStorage.getItem("pos-sidebar") === "collapsed")
+          document.documentElement.classList.add("sidebar-collapsed");
       } catch (e) { }
     })();
   </script>
@@ -20,32 +23,59 @@
   {% if current_user %}
   {% set settings_endpoints = ['payment_settings', 'currencies', 'customers', 'users', 'shift_page', 'shift_summary'] %}
   <aside class="sidebar">
-    <div class="brand">
-      <img src="{{ url_for('static', filename='img/logo.png') }}" class="brand-logo" alt="">
-      <span>{{ STORE_NAME }}</span>
+    <div class="sidebar-head">
+      <div class="brand">
+        <img src="{{ url_for('static', filename='img/logo.png') }}" class="brand-logo" alt="">
+        <span class="brand-name">{{ STORE_NAME }}</span>
+      </div>
+      <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
     </div>
     <nav class="nav">
       {% if current_user.is_admin %}
-      <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint == 'dashboard' }}">Dashboard</a>
+      <a href="{{ url_for('dashboard') }}" title="Dashboard" class="{{ 'active' if request.endpoint == 'dashboard' }}">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span class="nav-label">Dashboard</span>
+      </a>
       {% endif %}
-      <a href="{{ url_for('pos') }}" class="{{ 'active' if request.endpoint == 'pos' }}">POS</a>
+      <a href="{{ url_for('pos') }}" title="POS" class="{{ 'active' if request.endpoint == 'pos' }}">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+        <span class="nav-label">POS</span>
+      </a>
       {% if current_user.is_admin %}
-      <a href="{{ url_for('products') }}" class="{{ 'active' if request.endpoint == 'products' }}">Products</a>
-      <a href="{{ url_for('stock') }}" class="{{ 'active' if request.endpoint == 'stock' }}">Stock</a>
-      <a href="{{ url_for('sales') }}" class="{{ 'active' if request.endpoint == 'sales' }}">Sales</a>
+      <a href="{{ url_for('products') }}" title="Products" class="{{ 'active' if request.endpoint == 'products' }}">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+        <span class="nav-label">Products</span>
+      </a>
+      <a href="{{ url_for('stock') }}" title="Stock" class="{{ 'active' if request.endpoint == 'stock' }}">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        <span class="nav-label">Stock</span>
+      </a>
+      <a href="{{ url_for('sales') }}" title="Sales" class="{{ 'active' if request.endpoint == 'sales' }}">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+        <span class="nav-label">Sales</span>
+      </a>
       {% else %}
-      <a href="{{ url_for('shift_page') }}" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">Shift</a>
+      <a href="{{ url_for('shift_page') }}" title="Shift" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span class="nav-label">Shift</span>
+      </a>
       {% endif %}
     </nav>
     <div class="sidebar-footer">
       <a class="shift-pill {{ 'open' if current_shift else 'closed' }}" href="{{ url_for('shift_page') }}"
          title="{{ current_user.assigned_shift or 'No shift assigned' }}">
+        <span class="shift-label">
         {% if current_shift %}{{ current_shift.note or 'Shift open' }}
         {% elif current_user.assigned_shift %}{{ current_user.assigned_shift }}
         {% else %}No shift{% endif %}
+        </span>
       </a>
       <details class="nav-menu user-menu">
-        <summary class="{{ 'active' if current_user.is_admin and request.endpoint in settings_endpoints }}">
+        <summary class="{{ 'active' if current_user.is_admin and request.endpoint in settings_endpoints }}"
+                 title="{{ current_user.name }} ({{ current_user.role }})">
+          <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span class="who">{{ current_user.name }} <span class="muted small">({{ current_user.role }})</span></span>
         </summary>
         <div class="nav-menu-panel">
@@ -88,6 +118,20 @@
         </div>
       {% endfor %}
     </div>
+
+    {% if current_user and LICENSE and LICENSE.days_left is not none and LICENSE.days_left <= 14 %}
+    <div class="license-banner" role="status"
+         style="margin:.5rem 1rem 0;padding:.6rem .9rem;border-radius:8px;font-size:.85rem;
+                background:#fff4e5;color:#8a5300;border:1px solid #ffd8a8">
+      {% if LICENSE.days_left < 0 %}
+        Your license has expired. Please renew to keep using the POS.
+      {% elif LICENSE.days_left == 0 %}
+        Your license expires today. Please renew soon.
+      {% else %}
+        Your license expires in {{ LICENSE.days_left }} day{{ 's' if LICENSE.days_left != 1 }}. Please renew soon.
+      {% endif %}
+    </div>
+    {% endif %}
 
     <div class="app-scroll">
       <main class="container">
@@ -153,6 +197,23 @@
         if (!d.contains(e.target)) d.removeAttribute("open");
       });
     });
+
+    (function () {
+      const root = document.documentElement;
+      const btn = document.getElementById("sidebar-toggle");
+      if (!btn) return;
+      const sync = () => {
+        const collapsed = root.classList.contains("sidebar-collapsed");
+        btn.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+        btn.setAttribute("title", collapsed ? "Expand sidebar" : "Collapse sidebar");
+      };
+      sync();
+      btn.addEventListener("click", () => {
+        const collapsed = root.classList.toggle("sidebar-collapsed");
+        try { localStorage.setItem("pos-sidebar", collapsed ? "collapsed" : "expanded"); } catch (e) { }
+        sync();
+      });
+    })();
 
     (function () {
       const root = document.documentElement;

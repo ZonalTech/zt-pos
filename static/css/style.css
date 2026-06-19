@@ -132,19 +132,36 @@ body {
   color: #fff; padding: 18px 14px;
   border-right: 1px solid rgba(255, 255, 255, .06);
   box-shadow: 1px 0 0 rgba(255,255,255,.04), var(--shadow-md);
+  transition: width var(--ease), padding var(--ease);
+}
+.sidebar-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 4px 18px;
 }
 .brand {
   font-weight: 700; font-size: 17px; letter-spacing: .2px;
   display: flex; align-items: center; gap: 11px;
-  padding: 4px 8px 18px;
+  min-width: 0; padding: 0 4px;
 }
-.brand-logo { height: 32px; width: 32px; border-radius: 9px; display: block; box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
+.brand-name { white-space: nowrap; overflow: hidden; }
+.brand-logo { height: 32px; width: 32px; border-radius: 9px; display: block; flex: none; box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
+.sidebar-toggle {
+  margin-left: auto; flex: none; cursor: pointer;
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: var(--r-sm);
+  color: #aeb9cc; transition: color var(--ease), background var(--ease);
+}
+.sidebar-toggle:hover { color: #fff; background: rgba(255, 255, 255, .06); }
+.sidebar-toggle .chevron { width: 18px; height: 18px; transition: transform var(--ease); }
 .nav { display: flex; flex-direction: column; gap: 3px; }
 .nav a {
   position: relative; color: #aeb9cc; text-decoration: none;
   font-size: 14px; font-weight: 500; padding: 9px 14px; border-radius: var(--r-sm);
+  display: flex; align-items: center; gap: 12px; white-space: nowrap;
   transition: color var(--ease), background var(--ease);
 }
+.nav-ico { width: 18px; height: 18px; flex: none; }
+.nav-label { overflow: hidden; }
 .nav a:hover { color: #fff; background: rgba(255, 255, 255, .06); }
 .nav a.active { color: #fff; background: rgba(37, 99, 235, .22); }
 .nav a.active::after {
@@ -158,6 +175,24 @@ body {
   border-top: 1px solid rgba(255, 255, 255, .06);
   display: flex; flex-direction: column; gap: 10px;
 }
+
+/* ---------- Collapsed sidebar (icon rail) ---------- */
+.sidebar-collapsed .sidebar { width: 70px; padding-left: 10px; padding-right: 10px; }
+.sidebar-collapsed .sidebar-head { flex-direction: column; gap: 12px; padding-bottom: 14px; }
+.sidebar-collapsed .brand { padding: 0; justify-content: center; }
+.sidebar-collapsed .brand-name { display: none; }
+.sidebar-collapsed .sidebar-toggle { margin-left: 0; }
+.sidebar-collapsed .sidebar-toggle .chevron { transform: rotate(180deg); }
+.sidebar-collapsed .nav a { justify-content: center; padding-left: 0; padding-right: 0; gap: 0; }
+.sidebar-collapsed .nav-label { display: none; }
+.sidebar-collapsed .nav a.active::after { top: 6px; bottom: 6px; }
+.sidebar-collapsed .shift-label { display: none; }
+.sidebar-collapsed .shift-pill { padding-left: 0; padding-right: 0; }
+.sidebar-collapsed .user-menu summary { justify-content: center; padding-left: 0; padding-right: 0; }
+.sidebar-collapsed .user-menu summary .who,
+.sidebar-collapsed .user-menu summary::after { display: none; }
+/* When collapsed, the account popover can't be sidebar-width — give it room. */
+.sidebar-collapsed .nav-menu-panel { left: 0; right: auto; min-width: 200px; }
 
 /* ---------- Nav dropdown (account / settings menu) ---------- */
 .nav-menu { position: relative; }

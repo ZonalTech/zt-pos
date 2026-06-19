@@ -50,6 +50,16 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_recycle": 280, "pool_pre_ping": True}
 
+    # --- Licensing ---
+    # The vendor's Ed25519 PUBLIC key (base64 of 32 raw bytes). The POS uses it
+    # to verify license tokens; it can only *verify*, never *sign*, so shipping
+    # it in the app is safe. The matching PRIVATE key lives only in the React
+    # "License Generator" tool. Rotate by generating a new keypair there and
+    # replacing this value (or setting LICENSE_PUBLIC_KEY in .env).
+    LICENSE_PUBLIC_KEY = os.getenv(
+        "LICENSE_PUBLIC_KEY", "YwG3ZptN6IrboXLWQc1KwAcfQW+ckoiRHzyNVu09dU0="
+    )
+
     # --- Business settings ---
     CURRENCY = os.getenv("CURRENCY", "KES")
     STORE_NAME = os.getenv("STORE_NAME", "My Shop")
