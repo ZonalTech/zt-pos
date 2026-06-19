@@ -93,7 +93,7 @@ class Config:
     # Updates are published as GitHub Releases: the release tag is the version
     # (v1.2.0) and a ZTPOS-<version>.zip is attached. GitHub's "latest release"
     # API always points at the newest one, so nothing is hand-edited per release.
-    GITHUB_REPO = os.getenv("GITHUB_REPO", "ZonalTechnologies/zt-pos")
+    GITHUB_REPO = os.getenv("GITHUB_REPO", "ZonalTech/zt-pos")
     # The running app uses this to detect a newer release (in-app notice), then
     # applies it by re-launching the installer (ZTPOS-Setup.exe --update).
     # Override with an explicit UPDATE_URL in the environment / .env; an empty

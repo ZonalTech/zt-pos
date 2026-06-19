@@ -59,7 +59,7 @@ WEBVIEW2_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 # asset holding the flat POS.exe / Uninstall.exe payload. The
 # GitHub "latest release" API always points at the newest one, so there is
 # nothing to hand-edit per release — the same as the in-app updater uses.
-GITHUB_REPO = "ZonalTechnologies/zt-pos"
+GITHUB_REPO = "ZonalTech/zt-pos"
 GITHUB_LATEST_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 

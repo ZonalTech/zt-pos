@@ -92,15 +92,24 @@ body {
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
-  /* The page itself never scrolls — the topbar is a fixed-height row and only
-     the content area below it scrolls. This keeps the page scrollbar entirely
-     under the navbar, so it can never resize or shift the navbar. */
+  /* The page itself never scrolls — the sidebar is a fixed-width column and only
+     the content area beside it scrolls. The sidebar and main area sit side by
+     side, so the page scrollbar lives entirely within the content column. */
   height: 100vh;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
 }
-/* The only vertical scroll container: the content beneath the topbar. */
+/* Everything to the right of the sidebar: a vertical column whose body scrolls. */
+.main-area {
+  flex: 1 1 auto;
+  min-width: 0;             /* allow the flex child to shrink instead of overflowing */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+/* The only vertical scroll container: the content beside the sidebar. */
 .app-scroll {
   flex: 1 1 auto;
   min-height: 0;            /* allow the flex child to shrink so it can scroll */
@@ -114,45 +123,58 @@ body {
 *::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
 *::-webkit-scrollbar-thumb:hover { background: #94a3b8; background-clip: content-box; }
 
-/* ---------- Topbar ---------- */
-.topbar {
-  position: relative; z-index: 30; flex: none;  /* fixed-height row; never scrolls */
-  display: flex; align-items: center; justify-content: space-between;
+/* ---------- Sidebar ---------- */
+.sidebar {
+  position: relative; z-index: 30; flex: none;  /* fixed-width column; never scrolls */
+  width: 232px;
+  display: flex; flex-direction: column;
   background: linear-gradient(180deg, #0e1729, #0b1220);
-  color: #fff; padding: 0 24px; height: 60px;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
-  box-shadow: 0 1px 0 rgba(255,255,255,.04), var(--shadow-md);
+  color: #fff; padding: 18px 14px;
+  border-right: 1px solid rgba(255, 255, 255, .06);
+  box-shadow: 1px 0 0 rgba(255,255,255,.04), var(--shadow-md);
 }
-.brand { font-weight: 700; font-size: 17px; letter-spacing: .2px; display: flex; align-items: center; gap: 11px; }
+.brand {
+  font-weight: 700; font-size: 17px; letter-spacing: .2px;
+  display: flex; align-items: center; gap: 11px;
+  padding: 4px 8px 18px;
+}
 .brand-logo { height: 32px; width: 32px; border-radius: 9px; display: block; box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
-.nav { display: flex; align-items: center; }
+.nav { display: flex; flex-direction: column; gap: 3px; }
 .nav a {
-  position: relative; color: #aeb9cc; text-decoration: none; margin-left: 6px;
-  font-size: 14px; font-weight: 500; padding: 8px 12px; border-radius: var(--r-sm);
+  position: relative; color: #aeb9cc; text-decoration: none;
+  font-size: 14px; font-weight: 500; padding: 9px 14px; border-radius: var(--r-sm);
   transition: color var(--ease), background var(--ease);
 }
 .nav a:hover { color: #fff; background: rgba(255, 255, 255, .06); }
 .nav a.active { color: #fff; background: rgba(37, 99, 235, .22); }
 .nav a.active::after {
-  content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px;
-  background: var(--primary); border-radius: 2px;
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+  background: var(--primary); border-radius: 0 3px 3px 0;
 }
 
-/* ---------- Nav dropdown (Settings) ---------- */
-.nav-menu { position: relative; margin-left: 6px; }
+/* Bottom block of the sidebar: shift pill + user menu, pinned to the base. */
+.sidebar-footer {
+  margin-top: auto; padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, .06);
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* ---------- Nav dropdown (account / settings menu) ---------- */
+.nav-menu { position: relative; }
 .nav-menu summary {
   list-style: none; cursor: pointer; user-select: none;
   color: #aeb9cc; font-size: 14px; font-weight: 500;
-  padding: 8px 12px; border-radius: var(--r-sm);
-  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 12px; border-radius: var(--r-sm);
+  display: flex; align-items: center; gap: 6px;
   transition: color var(--ease), background var(--ease);
 }
 .nav-menu summary::-webkit-details-marker { display: none; }
-.nav-menu summary::after { content: "▾"; font-size: 10px; opacity: .8; }
+.nav-menu summary::after { content: "▾"; font-size: 10px; opacity: .8; margin-left: auto; }
+.nav-menu[open] summary::after { content: "▴"; }
 .nav-menu summary:hover { color: #fff; background: rgba(255, 255, 255, .06); }
 .nav-menu[open] summary, .nav-menu summary.active { color: #fff; background: rgba(37, 99, 235, .22); }
 .nav-menu-panel {
-  position: absolute; right: 0; top: calc(100% + 9px); min-width: 196px;
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 9px);
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md);
   box-shadow: var(--shadow-lg); padding: 6px; z-index: 40;
   display: flex; flex-direction: column; gap: 2px;
@@ -182,16 +204,12 @@ body {
 .nav-menu-item:hover { background: var(--primary-soft); color: var(--primary); }
 .nav-menu-item .tt-icon { font-size: 15px; line-height: 1; }
 
-/* ---------- Topbar user / shift ---------- */
-.user-box { display: flex; align-items: center; gap: 14px; color: #aeb9cc; font-size: 13.5px; }
-.user-box .who { color: #e7ecf3; font-weight: 500; }
-.user-box .muted { color: #8595ab; }
-.user-box .link { color: #aeb9cc; }
-.user-box .link:hover { color: #fff; text-decoration: underline; }
+/* ---------- Sidebar user / shift ---------- */
 .logout-form { margin: 0; }
 .shift-pill {
-  font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
-  text-decoration: none; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; padding: 7px 11px; border-radius: 999px;
+  text-decoration: none; border: 1px solid transparent;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
 }
 .shift-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .shift-pill.open { background: rgba(16, 185, 129, .14); color: #6ee7b7; border-color: rgba(16, 185, 129, .3); }

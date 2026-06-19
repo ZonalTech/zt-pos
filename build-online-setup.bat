@@ -58,7 +58,7 @@ echo  Done.  Ship this single file:
 echo     setup\ZTPOS-Online-Setup.exe
 echo  Run it on any 64-bit Windows PC - it asks for the admin
 echo  password, downloads the LATEST POS release from GitHub
-echo  (ZonalTechnologies/zt-pos), installs MariaDB + the app, and
+echo  (ZonalTech/zt-pos), installs MariaDB + the app, and
 echo  starts. No app files are baked into the installer, so the
 echo  same exe always installs whatever the newest release is.
 echo ============================================================

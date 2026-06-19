@@ -49,7 +49,7 @@ installer in update mode).
 ## For end users — installing the app
 
 1. Get **`ZTPOS-Online-Setup.exe`** (a small file, ~12 MB) from the latest
-   [GitHub release](https://github.com/ZonalTechnologies/zt-pos/releases/latest)
+   [GitHub release](https://github.com/ZonalTech/zt-pos/releases/latest)
    and double-click it. Approve the Windows admin (UAC) prompt.
 2. The setup window asks for:
    - **Admin username** (default `root`) and **password** — the database account

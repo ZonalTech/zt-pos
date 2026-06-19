@@ -17,13 +17,13 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-  <header class="topbar">
+  {% if current_user %}
+  {% set settings_endpoints = ['payment_settings', 'currencies', 'customers', 'users', 'shift_page', 'shift_summary'] %}
+  <aside class="sidebar">
     <div class="brand">
       <img src="{{ url_for('static', filename='img/logo.png') }}" class="brand-logo" alt="">
       <span>{{ STORE_NAME }}</span>
     </div>
-    {% if current_user %}
-    {% set settings_endpoints = ['payment_settings', 'currencies', 'customers', 'users', 'shift_page', 'shift_summary'] %}
     <nav class="nav">
       {% if current_user.is_admin %}
       <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint == 'dashboard' }}">Dashboard</a>
@@ -37,7 +37,7 @@
       <a href="{{ url_for('shift_page') }}" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">Shift</a>
       {% endif %}
     </nav>
-    <div class="user-box">
+    <div class="sidebar-footer">
       <a class="shift-pill {{ 'open' if current_shift else 'closed' }}" href="{{ url_for('shift_page') }}"
          title="{{ current_user.assigned_shift or 'No shift assigned' }}">
         {% if current_shift %}{{ current_shift.note or 'Shift open' }}
@@ -76,22 +76,24 @@
         </div>
       </details>
     </div>
-    {% endif %}
-  </header>
+  </aside>
+  {% endif %}
 
-  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false">
-    {% for category, message in get_flashed_messages(with_categories=true) %}
-      <div class="toast toast-{{ category }}" role="status">
-        <span class="toast-msg">{{ message }}</span>
-        <button class="toast-close" type="button" aria-label="Dismiss">&times;</button>
-      </div>
-    {% endfor %}
-  </div>
+  <div class="main-area">
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false">
+      {% for category, message in get_flashed_messages(with_categories=true) %}
+        <div class="toast toast-{{ category }}" role="status">
+          <span class="toast-msg">{{ message }}</span>
+          <button class="toast-close" type="button" aria-label="Dismiss">&times;</button>
+        </div>
+      {% endfor %}
+    </div>
 
-  <div class="app-scroll">
-    <main class="container">
-      {% block content %}{% endblock %}
-    </main>
+    <div class="app-scroll">
+      <main class="container">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
   </div>
 
   {% block scripts %}{% endblock %}
