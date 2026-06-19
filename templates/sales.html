@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Sales{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Sales</h1>
+  <div class="total-pill">Total: {{ CURRENCY }} {{ '%.2f'|format(total) }} <span class="muted">({{ sales|length }} sales)</span></div>
+</div>
+
+<form class="searchbar" method="get" action="{{ url_for('sales') }}">
+  <label class="inline">From <input type="date" name="from" value="{{ from_str }}"></label>
+  <label class="inline">To <input type="date" name="to" value="{{ to_str }}"></label>
+  <label class="inline">Cashier
+    <select name="user">
+      <option value="">All</option>
+      {% for u in people %}
+      <option value="{{ u.id }}" {{ 'selected' if user_id == u.id }}>{{ u.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if shift_id %}<input type="hidden" name="shift" value="{{ shift_id }}">{% endif %}
+  <button class="btn" type="submit">Filter</button>
+  {% if from_str or to_str or user_id or shift_id %}<a class="btn btn-ghost" href="{{ url_for('sales') }}">Clear</a>{% endif %}
+</form>
+
+{% if shift_id %}
+<p class="muted small">Shift #{{ shift_id }} · <a href="{{ url_for('sales') }}">Show all</a></p>
+{% endif %}
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>Sale #</th><th>Date</th><th>Items</th><th>Method</th>
+      <th>Total</th><th>Cashier</th><th>Shift</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sales %}
+    <tr>
+      <td class="mono">{{ s.sale_number }}</td>
+      <td>{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ s.items | sum(attribute='quantity') }}</td>
+      <td><span class="badge">{{ s.payment_method }}</span></td>
+      <td>{{ CURRENCY }} {{ '%.2f'|format(s.total) }}</td>
+      <td>{{ s.user.name if s.user else s.cashier }}</td>
+      <td>{% if s.shift_id %}<a class="link" href="{{ url_for('shift_summary', shift_id=s.shift_id) }}">#{{ s.shift_id }}</a>{% else %}—{% endif %}</td>
+      <td><a class="link" href="{{ url_for('receipt', sale_id=s.id) }}" target="_blank">Receipt</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">No sales in this range.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

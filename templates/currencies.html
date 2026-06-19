@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Currencies{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Currencies</h1>
+  <div style="display:flex; align-items:center; gap:12px">
+    <span class="live-pill" id="rates-status" title="">
+      <span class="dot"></span><span id="rates-status-text">Live</span>
+    </span>
+    <form method="post" action="{{ url_for('currencies_refresh') }}" id="refresh-form">
+      <button class="btn btn-primary" type="submit" id="btn-refresh">↻ Refresh live rates</button>
+    </form>
+  </div>
+</div>
+
+<p class="muted" style="margin-top:-6px">
+  Rates show how many units of each currency equal <strong>1 {{ base }}</strong>
+  (the base currency). Sales are always recorded in {{ base }}; the customer's
+  currency, the rate used, and the foreign amount are saved on each sale for the
+  receipt. Rates update automatically in the background; a manual rate is never
+  overwritten.
+</p>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th>Currency</th><th>Rate (per 1 {{ base }})</th>
+      <th>1 unit =</th><th>Source</th><th>Updated</th>
+    </tr>
+  </thead>
+  <tbody id="rates-body">
+    {% for r in rows %}
+    <tr>
+      <td class="mono">{{ r.currency }}{% if r.is_base %} <span class="badge badge-sale">base</span>{% endif %}</td>
+      <td class="mono">{{ '%.6f'|format(r.rate) if r.rate is not none else '—' }}</td>
+      <td class="mono">
+        {% if r.is_base %}—
+        {% elif r.per_unit %}{{ '%.4f'|format(r.per_unit) }} {{ base }}
+        {% else %}—{% endif %}
+      </td>
+      <td>
+        {% if r.source == 'manual' %}<span class="badge">manual</span>
+        {% elif r.source == 'live' %}<span class="badge badge-receive">live</span>
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      <td class="muted small rate-updated" data-ts="{{ r.updated_at.isoformat() if r.updated_at else '' }}">
+        {{ r.updated_at.strftime('%Y-%m-%d %H:%M') if r.updated_at else '—' }}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No currencies configured.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="card" style="margin-top:22px; max-width:480px">
+  <h2 style="font-size:17px; margin-bottom:14px">Set a rate manually</h2>
+  <form method="post" action="{{ url_for('currencies_save') }}" class="form-grid">
+    <div>
+      <label for="cur">Currency</label>
+      <select name="currency" id="cur">
+        {% for r in rows %}
+          {% if not r.is_base %}<option value="{{ r.currency }}">{{ r.currency }}</option>{% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="rate">Rate (units per 1 {{ base }})</label>
+      <input type="number" name="rate" id="rate" step="0.00000001" min="0" placeholder="e.g. 0.0077" required>
+    </div>
+    <div style="grid-column:1 / -1">
+      <button class="btn btn-primary" type="submit">Save manual rate</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const BASE = {{ base|tojson }};
+  const POLL_MS = 30000;        // background refresh cadence
+  const body = document.getElementById("rates-body");
+  const statusEl = document.getElementById("rates-status");
+  const statusText = document.getElementById("rates-status-text");
+  const refreshForm = document.getElementById("refresh-form");
+  const btnRefresh = document.getElementById("btn-refresh");
+  let lastChecked = null;       // Date of the last successful poll
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // "just now" / "12s ago" / "5m ago" / "2h ago" for a past ISO timestamp.
+  function ago(iso) {
+    if (!iso) return "—";
+    const then = new Date(iso).getTime();
+    if (isNaN(then)) return "—";
+    const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+    if (s < 5) return "just now";
+    if (s < 60) return s + "s ago";
+    const m = Math.round(s / 60);
+    if (m < 60) return m + "m ago";
+    const h = Math.round(m / 60);
+    if (h < 24) return h + "h ago";
+    return new Date(iso).toLocaleString();
+  }
+
+  function fmt(n, dp) { return Number(n).toFixed(dp); }
+
+  function renderRows(rows) {
+    body.innerHTML = "";
+    rows.forEach((r) => {
+      const tr = document.createElement("tr");
+      const rate = r.rate != null ? fmt(r.rate, 6) : "—";
+      const unit = r.is_base ? "—" : (r.per_unit ? `${fmt(r.per_unit, 4)} ${esc(BASE)}` : "—");
+      let source = '<span class="muted">—</span>';
+      if (r.source === "manual") source = '<span class="badge">manual</span>';
+      else if (r.source === "live") source = '<span class="badge badge-receive">live</span>';
+      const baseBadge = r.is_base ? ' <span class="badge badge-sale">base</span>' : "";
+      tr.innerHTML =
+        `<td class="mono">${esc(r.currency)}${baseBadge}</td>` +
+        `<td class="mono">${rate}</td>` +
+        `<td class="mono">${unit}</td>` +
+        `<td>${source}</td>` +
+        `<td class="muted small rate-updated" data-ts="${r.updated_at || ""}">${ago(r.updated_at)}</td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  // Re-render the relative "Updated" labels (cheap, runs every second).
+  function tickRelative() {
+    document.querySelectorAll(".rate-updated").forEach((td) => {
+      const ts = td.getAttribute("data-ts");
+      if (ts) td.textContent = ago(ts);
+    });
+    if (lastChecked) {
+      const s = Math.round((Date.now() - lastChecked) / 1000);
+      statusText.textContent = "Live · checked " + (s < 5 ? "just now" : s + "s ago");
+    }
+  }
+
+  function setStatus(ok, msg) {
+    statusEl.classList.toggle("is-error", !ok);
+    statusEl.title = msg || "";
+    if (!ok) statusText.textContent = "Offline";
+  }
+
+  async function poll(force) {
+    try {
+      const res = await fetch("/api/currencies" + (force ? "?force=1" : ""));
+      const data = await res.json();
+      if (data.rows) renderRows(data.rows);
+      lastChecked = Date.now();
+      setStatus(!data.error, data.error ? `Live source unreachable: ${data.error}` : "");
+      return data;
+    } catch (e) {
+      setStatus(false, "Network error");
+      return null;
+    }
+  }
+
+  // Manual "Refresh live rates" → force a fetch via AJAX, toast the result.
+  if (refreshForm) {
+    refreshForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      btnRefresh.disabled = true;
+      const original = btnRefresh.textContent;
+      btnRefresh.textContent = "Refreshing…";
+      const data = await poll(true);
+      btnRefresh.disabled = false;
+      btnRefresh.textContent = original;
+      if (data && !data.error) window.showToast("Rates updated from the live source.", "success");
+      else if (data) window.showToast(`Live update failed (${data.error}). Showing cached rates.`, "error");
+    });
+  }
+
+  setInterval(tickRelative, 1000);
+  setInterval(() => poll(false), POLL_MS);
+  // Refresh immediately when the window regains focus.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(false); });
+  poll(false);  // first live check on load
+})();
+</script>
+{% endblock %}

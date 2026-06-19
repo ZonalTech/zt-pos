@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Products{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Products</h1>
+  <button class="btn btn-primary" type="button" onclick="openProductForm()">+ Add product</button>
+</div>
+
+<form class="searchbar" method="get" action="{{ url_for('products') }}">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search by name or barcode…">
+  <button class="btn" type="submit">Search</button>
+  {% if q %}<a class="btn btn-ghost" href="{{ url_for('products') }}">Clear</a>{% endif %}
+</form>
+
+<table class="table">
+  <thead>
+    <tr>
+      <th></th><th>Barcode</th><th>Name</th><th>Price</th><th>Cost</th>
+      <th>On hand</th><th>Reorder</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in products %}
+    <tr class="{{ 'row-inactive' if not p.is_active }}">
+      <td>
+        {% if p.image %}
+        <img class="product-thumb" src="{{ url_for('product_image', filename=p.image) }}" alt="">
+        {% else %}
+        <span class="product-thumb product-thumb-empty">—</span>
+        {% endif %}
+      </td>
+      <td class="mono">{{ p.barcode }}</td>
+      <td>{{ p.name }}{% if not p.is_active %} <span class="badge">inactive</span>{% endif %}</td>
+      <td>{{ CURRENCY }} {{ '%.2f'|format(p.price) }}</td>
+      <td>{{ CURRENCY }} {{ '%.2f'|format(p.cost_price) }}</td>
+      <td class="{{ 'text-danger' if p.low_stock }}">{{ p.quantity }}</td>
+      <td>{{ p.reorder_level }}</td>
+      <td class="actions">
+        <button class="link" type="button"
+          onclick='editProduct({{ p.to_dict() | tojson }})'>Edit</button>
+        {% if p.is_active %}
+        <form method="post" action="{{ url_for('product_delete', pid=p.id) }}"
+              onsubmit="return confirm('Deactivate {{ p.name }}?')">
+          <button class="link link-danger" type="submit">Deactivate</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">No products yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<!-- Add/edit modal -->
+<div class="modal" id="product-modal" hidden>
+  <div class="modal-box">
+    <h2 id="product-modal-title">Add product</h2>
+    <form method="post" action="{{ url_for('product_save') }}" enctype="multipart/form-data">
+      <input type="hidden" name="id" id="f-id">
+      <label>Barcode *</label>
+      <input type="text" name="barcode" id="f-barcode" required>
+      <label>Name *</label>
+      <input type="text" name="name" id="f-name" required>
+      <label>Description</label>
+      <input type="text" name="description" id="f-description">
+
+      <label>Product image</label>
+      <div class="image-field">
+        <img id="f-image-preview" class="image-preview" alt="" hidden>
+        <span id="f-image-empty" class="image-preview image-preview-empty">No image</span>
+        <div class="image-field-controls">
+          <input type="file" name="image" id="f-image" accept="image/png,image/jpeg,image/gif,image/webp">
+          <label class="image-remove" id="f-image-remove-wrap" hidden>
+            <input type="checkbox" name="remove_image" id="f-image-remove"> Remove current image
+          </label>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div>
+          <label>Selling price *</label>
+          <input type="number" name="price" id="f-price" step="0.01" min="0" required>
+        </div>
+        <div>
+          <label>Cost price</label>
+          <input type="number" name="cost_price" id="f-cost" step="0.01" min="0" value="0">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div id="qty-field">
+          <label>Opening stock</label>
+          <input type="number" name="quantity" id="f-quantity" min="0" value="0">
+        </div>
+        <div>
+          <label>Reorder level</label>
+          <input type="number" name="reorder_level" id="f-reorder" min="0" value="5">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" onclick="closeProductForm()">Cancel</button>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  // Show a thumbnail in the form: a URL (existing image) or null (none).
+  function setImagePreview(url) {
+    const img = document.getElementById('f-image-preview');
+    const empty = document.getElementById('f-image-empty');
+    if (url) {
+      img.src = url; img.hidden = false; empty.hidden = true;
+    } else {
+      img.hidden = true; img.removeAttribute('src'); empty.hidden = false;
+    }
+  }
+
+  function openProductForm() {
+    document.getElementById('product-modal-title').textContent = 'Add product';
+    document.querySelector('#product-modal form').reset();
+    document.getElementById('f-id').value = '';
+    document.getElementById('qty-field').style.display = '';
+    document.getElementById('f-image-remove-wrap').hidden = true;
+    document.getElementById('f-image-remove').checked = false;
+    setImagePreview(null);
+    document.getElementById('product-modal').hidden = false;
+    document.getElementById('f-barcode').focus();
+  }
+  function editProduct(p) {
+    document.getElementById('product-modal-title').textContent = 'Edit product';
+    document.querySelector('#product-modal form').reset();
+    document.getElementById('f-id').value = p.id;
+    document.getElementById('f-barcode').value = p.barcode;
+    document.getElementById('f-name').value = p.name;
+    document.getElementById('f-description').value = p.description || '';
+    document.getElementById('f-price').value = p.price;
+    document.getElementById('f-cost').value = p.cost_price;
+    document.getElementById('f-reorder').value = p.reorder_level;
+    document.getElementById('qty-field').style.display = 'none';
+    document.getElementById('f-image-remove').checked = false;
+    document.getElementById('f-image-remove-wrap').hidden = !p.image_url;
+    setImagePreview(p.image_url || null);
+    document.getElementById('product-modal').hidden = false;
+  }
+  function closeProductForm() {
+    document.getElementById('product-modal').hidden = true;
+  }
+
+  // Live preview of a newly chosen file (clears the "remove" checkbox).
+  document.getElementById('f-image').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    document.getElementById('f-image-remove').checked = false;
+    setImagePreview(URL.createObjectURL(file));
+  });
+</script>
+{% endblock %}

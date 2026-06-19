@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Shift summary{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Shift summary</h1>
+  <a class="btn btn-ghost" href="{{ url_for('shift_page') }}">Back to shifts</a>
+</div>
+
+<section class="panel" style="max-width:560px">
+  <table class="table compact">
+    <tbody>
+      <tr><td>Cashier</td><td class="r-amt">{{ shift.user.name if shift.user else '—' }}</td></tr>
+      <tr><td>Opened</td><td class="r-amt">{{ shift.opened_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+      <tr><td>Closed</td><td class="r-amt">
+        {% if shift.closed_at %}{{ shift.closed_at.strftime('%Y-%m-%d %H:%M') }}
+        {% else %}<span class="badge badge-receive">still open</span>{% endif %}
+      </td></tr>
+    </tbody>
+  </table>
+
+  <h2 style="margin-top:16px">Takings</h2>
+  <table class="table compact">
+    <tbody>
+      <tr><td>Sales</td><td class="r-amt">{{ summary.count }}</td></tr>
+      {% for method, amount in summary.by_method.items() %}
+      <tr><td>{{ method | capitalize }}</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(amount) }}</td></tr>
+      {% endfor %}
+      <tr class="r-grand"><td><strong>Total takings</strong></td>
+          <td class="r-amt"><strong>{{ CURRENCY }} {{ '%.2f'|format(summary.total) }}</strong></td></tr>
+    </tbody>
+  </table>
+
+  <h2 style="margin-top:16px">Cash reconciliation</h2>
+  <table class="table compact">
+    <tbody>
+      <tr><td>Opening float</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(summary.opening_float) }}</td></tr>
+      <tr><td>+ Cash sales</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(summary.cash_sales) }}</td></tr>
+      <tr><td><strong>Expected in drawer</strong></td>
+          <td class="r-amt"><strong>{{ CURRENCY }} {{ '%.2f'|format(summary.expected_cash) }}</strong></td></tr>
+      {% if summary.closing_cash is not none %}
+      <tr><td>Counted at close</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(summary.closing_cash) }}</td></tr>
+      <tr><td><strong>Over / short</strong></td>
+          <td class="r-amt {{ 'text-success' if summary.over_short >= 0 else 'text-danger' }}">
+            <strong>{{ '+' if summary.over_short > 0 }}{{ CURRENCY }} {{ '%.2f'|format(summary.over_short) }}</strong>
+          </td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {% if current_user.is_admin %}
+  <a class="btn" style="margin-top:16px" href="{{ url_for('sales', shift=shift.id) }}">View these sales</a>
+  {% endif %}
+</section>
+{% endblock %}

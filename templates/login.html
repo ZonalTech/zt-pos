@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <section class="panel login-panel">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" class="login-logo" alt="">
+    <h1>Sign in</h1>
+    <form method="post" action="{{ url_for('login') }}" autocomplete="off">
+      <label>Username</label>
+      <input type="text" name="username" value="{{ username or '' }}" autofocus required>
+      <label>Password</label>
+      <input type="password" name="password" required>
+      <button class="btn btn-primary btn-lg" type="submit" style="width:100%">Sign in</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

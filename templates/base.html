@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}POS{% endblock %} · {{ STORE_NAME }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("pos-theme");
+        if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { }
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='img/logo.png') }}" class="brand-logo" alt="">
+      <span>{{ STORE_NAME }}</span>
+    </div>
+    {% if current_user %}
+    {% set settings_endpoints = ['payment_settings', 'currencies', 'customers', 'users', 'shift_page', 'shift_summary'] %}
+    <nav class="nav">
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint == 'dashboard' }}">Dashboard</a>
+      {% endif %}
+      <a href="{{ url_for('pos') }}" class="{{ 'active' if request.endpoint == 'pos' }}">POS</a>
+      {% if current_user.is_admin %}
+      <a href="{{ url_for('products') }}" class="{{ 'active' if request.endpoint == 'products' }}">Products</a>
+      <a href="{{ url_for('stock') }}" class="{{ 'active' if request.endpoint == 'stock' }}">Stock</a>
+      <a href="{{ url_for('sales') }}" class="{{ 'active' if request.endpoint == 'sales' }}">Sales</a>
+      {% else %}
+      <a href="{{ url_for('shift_page') }}" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">Shift</a>
+      {% endif %}
+    </nav>
+    <div class="user-box">
+      <a class="shift-pill {{ 'open' if current_shift else 'closed' }}" href="{{ url_for('shift_page') }}"
+         title="{{ current_user.assigned_shift or 'No shift assigned' }}">
+        {% if current_shift %}{{ current_shift.note or 'Shift open' }}
+        {% elif current_user.assigned_shift %}{{ current_user.assigned_shift }}
+        {% else %}No shift{% endif %}
+      </a>
+      <details class="nav-menu user-menu">
+        <summary class="{{ 'active' if current_user.is_admin and request.endpoint in settings_endpoints }}">
+          <span class="who">{{ current_user.name }} <span class="muted small">({{ current_user.role }})</span></span>
+        </summary>
+        <div class="nav-menu-panel">
+          {% if current_user.is_admin %}
+          <a href="{{ url_for('payment_settings') }}" class="{{ 'active' if request.endpoint == 'payment_settings' }}">Payments</a>
+          <a href="{{ url_for('currencies') }}" class="{{ 'active' if request.endpoint == 'currencies' }}">Currencies</a>
+          <a href="{{ url_for('customers') }}" class="{{ 'active' if request.endpoint == 'customers' }}">Customers</a>
+          <a href="{{ url_for('users') }}" class="{{ 'active' if request.endpoint == 'users' }}">Users</a>
+          <a href="{{ url_for('shift_page') }}" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">Shift</a>
+          <button type="button" class="nav-menu-item" id="update-btn">
+            <span class="tt-icon" aria-hidden="true">⬇️</span>
+            <span class="tt-label">Check for updates</span>
+          </button>
+          <div class="nav-menu-sep"></div>
+          {% endif %}
+          <button type="button" class="nav-menu-item theme-toggle" id="theme-toggle" aria-pressed="false">
+            <span class="tt-icon" aria-hidden="true">🌙</span>
+            <span class="tt-label">Dark mode</span>
+          </button>
+          <div class="nav-menu-sep"></div>
+          <form method="post" action="{{ url_for('logout') }}" class="logout-form">
+            <button type="submit" class="nav-menu-item">
+              <span class="tt-icon" aria-hidden="true">⏻</span>
+              <span class="tt-label">Sign out</span>
+            </button>
+          </form>
+          <div class="nav-menu-version">v{{ APP_VERSION }}</div>
+        </div>
+      </details>
+    </div>
+    {% endif %}
+  </header>
+
+  <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false">
+    {% for category, message in get_flashed_messages(with_categories=true) %}
+      <div class="toast toast-{{ category }}" role="status">
+        <span class="toast-msg">{{ message }}</span>
+        <button class="toast-close" type="button" aria-label="Dismiss">&times;</button>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="app-scroll">
+    <main class="container">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  {% block scripts %}{% endblock %}
+  <script>
+    (function () {
+      const stack = document.getElementById("toast-stack");
+      function dismiss(t) {
+        t.classList.remove("toast-in");
+        t.classList.add("toast-out");
+        setTimeout(() => t.remove(), 220);
+      }
+      function wire(t) {
+        const btn = t.querySelector(".toast-close");
+        if (btn) btn.addEventListener("click", () => dismiss(t));
+        const isError = t.classList.contains("toast-error");
+        const ttl = t.hasAttribute("data-sticky") ? 0 : (isError ? 7000 : 4000);
+        if (ttl) setTimeout(() => dismiss(t), ttl);
+        requestAnimationFrame(() => t.classList.add("toast-in"));
+      }
+      window.showToast = function (message, category, opts) {
+        if (!stack) return null;
+        opts = opts || {};
+        const t = document.createElement("div");
+        t.className = "toast toast-" + (category || "success");
+        t.setAttribute("role", "status");
+        if (opts.sticky) t.setAttribute("data-sticky", "1");
+        const span = document.createElement("span");
+        span.className = "toast-msg";
+        span.textContent = message;
+        t.append(span);
+        if (opts.action && opts.action.label) {
+          const act = document.createElement("button");
+          act.type = "button";
+          act.className = "toast-action";
+          act.textContent = opts.action.label;
+          act.addEventListener("click", () => {
+            try { opts.action.onClick && opts.action.onClick(); }
+            finally { dismiss(t); }
+          });
+          t.append(act);
+        }
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "toast-close";
+        btn.setAttribute("aria-label", "Dismiss");
+        btn.innerHTML = "&times;";
+        t.append(btn);
+        stack.appendChild(t);
+        wire(t);
+        return t;
+      };
+      stack && stack.querySelectorAll(".toast").forEach(wire);
+    })();
+
+    document.addEventListener("click", (e) => {
+      document.querySelectorAll("details.nav-menu[open]").forEach((d) => {
+        if (!d.contains(e.target)) d.removeAttribute("open");
+      });
+    });
+
+    (function () {
+      const root = document.documentElement;
+      const btn = document.getElementById("theme-toggle");
+      const sync = () => {
+        const dark = root.getAttribute("data-theme") === "dark";
+        if (!btn) return;
+        btn.setAttribute("aria-pressed", String(dark));
+        btn.querySelector(".tt-icon").textContent = dark ? "☀️" : "🌙";
+        btn.querySelector(".tt-label").textContent = dark ? "Light mode" : "Dark mode";
+      };
+      sync();
+      if (btn) {
+        btn.addEventListener("click", () => {
+          const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+          root.setAttribute("data-theme", next);
+          try { localStorage.setItem("pos-theme", next); } catch (e) { }
+          sync();
+        });
+      }
+    })();
+  </script>
+
+  {% if current_user and current_user.is_admin %}
+  <script>
+    (function () {
+      async function launchUpdater() {
+        try {
+          const res = await fetch("/api/update/launch", { method: "POST" });
+          const data = await res.json();
+          if (data.ok) window.showToast(
+            "Updating… approve the prompt; ZT POS will close and reopen.", "info");
+          else window.showToast(data.error || "Could not start the update.", "error");
+        } catch (_) {
+          window.showToast("Could not start the update.", "error");
+        }
+      }
+      async function checkForUpdate(verbose) {
+        try {
+          const res = await fetch("/api/update/check");
+          const data = await res.json();
+          if (data && data.available) {
+            window.showToast(
+              `Update available: v${data.latest} (you have v${data.current}).`,
+              "info",
+              { sticky: true, action: { label: "Update now", onClick: launchUpdater } }
+            );
+          } else if (verbose) {
+            if (data && data.error) {
+              window.showToast("Couldn't check for updates (offline?).", "error");
+            } else if (data && !data.configured) {
+              window.showToast("Updates aren't configured for this install.", "info");
+            } else {
+              window.showToast(`You're up to date (v${data.current}).`, "success");
+            }
+          }
+        } catch (_) {
+          if (verbose) window.showToast("Couldn't check for updates.", "error");
+        }
+      }
+
+      const updateBtn = document.getElementById("update-btn");
+      if (updateBtn) {
+        updateBtn.addEventListener("click", () => {
+          window.showToast("Checking for updates…", "info");
+          checkForUpdate(true);
+        });
+      }
+
+      setTimeout(() => checkForUpdate(false), 1500);
+    })();
+  </script>
+  {% endif %}
+</body>
+</html>

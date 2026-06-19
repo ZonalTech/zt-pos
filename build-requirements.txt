@@ -1,0 +1,3 @@
+# Build-time only (not needed on the customer machine).
+-r requirements.txt
+pyinstaller>=6.15

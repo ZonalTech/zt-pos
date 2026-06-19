@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Stock{% endblock %}
+{% block content %}
+{% set low_count = products | selectattr('low_stock') | list | length %}
+<div class="page-head">
+  <h1>Stock</h1>
+  <div class="actions">
+    <span class="total-pill">{{ products | length }} item{{ '' if products | length == 1 else 's' }}</span>
+    <span class="total-pill {{ 'text-danger' if low_count }}">
+      {{ low_count }} low on stock
+    </span>
+  </div>
+</div>
+
+<div class="grid-2">
+  <section class="panel">
+    <h2>Receive / adjust stock</h2>
+    <form id="receive-form" autocomplete="off">
+      <label>Barcode</label>
+      <input type="text" id="r-barcode" placeholder="Scan or type barcode…" autofocus>
+      <div id="r-product" class="resolved-product muted">No item selected.</div>
+
+      <label>Quantity (use − to remove)</label>
+      <input type="number" id="r-qty" value="1" step="1">
+
+      <label>Note (optional)</label>
+      <input type="text" id="r-note" placeholder="e.g. Supplier delivery #123">
+
+      <button class="btn btn-primary" id="r-submit" type="submit">Apply</button>
+      <p class="error-text" id="r-error"></p>
+      <p class="success-text" id="r-success"></p>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Current stock</h2>
+    <table class="table compact scrolly">
+      <thead><tr><th>Item</th><th>Barcode</th><th>On hand</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for p in products %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td class="mono">{{ p.barcode }}</td>
+          <td class="{{ 'text-danger' if p.low_stock }}">{{ p.quantity }}</td>
+          <td>
+            {% if p.low_stock %}
+              <span class="badge badge-warn">Low · reorder {{ p.reorder_level }}</span>
+            {% else %}
+              <span class="badge badge-receive">OK</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="muted">No active products yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<section class="panel">
+  <h2>Recent stock movements</h2>
+  <table class="table compact">
+    <thead>
+      <tr><th>When</th><th>Item</th><th>Type</th><th>Change</th><th>Ref / note</th></tr>
+    </thead>
+    <tbody id="movements-body">
+      {% for m in movements %}
+      <tr>
+        <td>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ m.product.name if m.product else '—' }}</td>
+        <td><span class="badge badge-{{ m.movement_type }}">{{ m.movement_type }}</span></td>
+        <td class="{{ 'text-success' if m.change_qty > 0 else 'text-danger' }}">
+          {{ '+' if m.change_qty > 0 }}{{ m.change_qty }}
+        </td>
+        <td>{{ m.reference or m.note or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">No movements yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/stock.js') }}"></script>
+{% endblock %}

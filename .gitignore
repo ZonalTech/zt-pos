@@ -1,0 +1,21 @@
+.venv/
+.claude/
+__pycache__/
+*.pyc
+.env
+*.log
+
+# Uploaded product images (runtime data)
+uploads/
+
+# Build artifacts
+setup/
+build/
+dist/
+installer/Output/
+*.spec.bak
+release/*.zip
+
+# Dev/server runtime output
+release/*.err
+release/*.out

@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Payment settings{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Payment settings</h1>
+</div>
+<p class="muted">Cash is always available. Enable and configure M-Pesa and bank
+  payments below — these settings apply to every till.</p>
+
+<!-- ============================ M-Pesa ============================ -->
+<section class="settings-card" style="margin-top:16px">
+  <div class="page-head">
+    <h2>M-Pesa <span class="muted small">(Lipa na M-Pesa Online / STK Push)</span></h2>
+    <span class="badge {{ 'badge-ok' if mpesa_ready else '' }}">
+      {{ 'Configured' if mpesa_ready else 'Incomplete' }}
+    </span>
+  </div>
+  <p class="muted small">
+    Credentials come from a Daraja app on
+    <a href="https://developer.safaricom.co.ke" target="_blank" rel="noopener">developer.safaricom.co.ke</a>.
+    Amounts are charged in {{ base_currency }}.
+  </p>
+
+  <form method="post" action="{{ url_for('payment_settings_mpesa') }}">
+    <label class="check">
+      <input type="checkbox" name="mpesa_enabled" {{ 'checked' if cfg.mpesa_enabled == '1' }}>
+      Offer M-Pesa at the till
+    </label>
+
+    <div class="form-grid">
+      <div>
+        <label>Environment</label>
+        <select name="mpesa_env">
+          <option value="sandbox" {{ 'selected' if cfg.mpesa_env == 'sandbox' }}>Sandbox (testing)</option>
+          <option value="production" {{ 'selected' if cfg.mpesa_env == 'production' }}>Production (live)</option>
+        </select>
+      </div>
+      <div>
+        <label>Shortcode type</label>
+        <select name="mpesa_tx_type">
+          <option value="paybill" {{ 'selected' if cfg.mpesa_tx_type == 'paybill' }}>Paybill</option>
+          <option value="till" {{ 'selected' if cfg.mpesa_tx_type == 'till' }}>Till (Buy Goods)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <div>
+        <label>Consumer key</label>
+        <input type="text" name="mpesa_consumer_key" value="{{ cfg.mpesa_consumer_key }}"
+               autocomplete="off">
+      </div>
+      <div>
+        <label>Consumer secret</label>
+        <input type="password" name="mpesa_consumer_secret" autocomplete="new-password"
+               placeholder="{{ '•••••• (set — leave blank to keep)' if cfg.mpesa_consumer_secret_set else 'not set' }}">
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <div>
+        <label>Business shortcode</label>
+        <input type="text" name="mpesa_shortcode" value="{{ cfg.mpesa_shortcode }}"
+               inputmode="numeric" placeholder="e.g. 174379">
+      </div>
+      <div>
+        <label>Passkey</label>
+        <input type="password" name="mpesa_passkey" autocomplete="new-password"
+               placeholder="{{ '•••••• (set — leave blank to keep)' if cfg.mpesa_passkey_set else 'not set' }}">
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <div>
+        <label>Account reference</label>
+        <input type="text" name="mpesa_account_ref" value="{{ cfg.mpesa_account_ref }}"
+               maxlength="12" placeholder="POS">
+      </div>
+      <div>
+        <label>Callback URL</label>
+        <input type="url" name="mpesa_callback_url" value="{{ cfg.mpesa_callback_url }}"
+               placeholder="https://your-domain/api/mpesa/callback">
+      </div>
+    </div>
+    <p class="muted small">Daraja POSTs the result to the callback URL. It must be a
+      public HTTPS address ending in <code>/api/mpesa/callback</code>. The till also
+      polls Safaricom directly, so confirmation still works if the callback can't reach this machine.</p>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" type="submit">Save M-Pesa settings</button>
+    </div>
+  </form>
+
+  <form method="post" action="{{ url_for('payment_settings_mpesa_test') }}" style="margin-top:8px">
+    <button class="btn btn-ghost" type="submit">Test connection</button>
+    <span class="muted small">Requests an access token to confirm the key/secret/environment.</span>
+  </form>
+</section>
+
+<!-- ============================= Bank ============================= -->
+<section class="settings-card" style="margin-top:24px">
+  <div class="page-head">
+    <h2>Bank transfer</h2>
+    <span class="badge {{ 'badge-ok' if bank_ready else '' }}">
+      {{ 'Configured' if bank_ready else 'Incomplete' }}
+    </span>
+  </div>
+  <p class="muted small">The customer pays by bank transfer/deposit and the cashier
+    records the reference at checkout. These details are shown to the cashier so they
+    can tell the customer where to send the money.</p>
+
+  <form method="post" action="{{ url_for('payment_settings_bank') }}">
+    <label class="check">
+      <input type="checkbox" name="bank_enabled" {{ 'checked' if cfg.bank_enabled == '1' }}>
+      Offer bank transfer at the till
+    </label>
+
+    <div class="form-grid">
+      <div>
+        <label>Bank name</label>
+        <input type="text" name="bank_name" value="{{ cfg.bank_name }}">
+      </div>
+      <div>
+        <label>Branch</label>
+        <input type="text" name="bank_branch" value="{{ cfg.bank_branch }}">
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <div>
+        <label>Account name</label>
+        <input type="text" name="bank_account_name" value="{{ cfg.bank_account_name }}">
+      </div>
+      <div>
+        <label>Account number</label>
+        <input type="text" name="bank_account_number" value="{{ cfg.bank_account_number }}">
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <div>
+        <label>Paybill / till (optional)</label>
+        <input type="text" name="bank_paybill" value="{{ cfg.bank_paybill }}"
+               placeholder="for bank-app transfers">
+      </div>
+    </div>
+
+    <details style="margin-top:8px">
+      <summary class="muted small">Advanced — bank API (reserved for a future live integration)</summary>
+      <div class="form-grid" style="margin-top:8px">
+        <div>
+          <label>API base URL</label>
+          <input type="url" name="bank_api_base_url" value="{{ cfg.bank_api_base_url }}">
+        </div>
+        <div>
+          <label>API key</label>
+          <input type="password" name="bank_api_key" autocomplete="new-password"
+                 placeholder="{{ '•••••• (set — leave blank to keep)' if cfg.bank_api_key_set else 'not set' }}">
+        </div>
+      </div>
+      <p class="muted small">Stored for later. Bank payments are recorded by reference today;
+        no live API call is made yet.</p>
+    </details>
+
+    <div class="modal-actions">
+      <button class="btn btn-primary" type="submit">Save bank settings</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

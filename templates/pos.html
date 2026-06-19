@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}POS{% endblock %}
+{% block content %}
+<div class="pos-layout">
+  <!-- Left: scan + product grid -->
+  <section class="pos-scan">
+    <h1>POS</h1>
+    {% if not current_shift %}
+    <div class="flash flash-error" style="margin-bottom:12px">
+      No open shift — <a href="{{ url_for('shift_page') }}">open a shift</a>.
+    </div>
+    {% endif %}
+    <form id="scan-form" autocomplete="off">
+      <input type="text" id="scan-input" placeholder="Scan or search…"
+             autofocus inputmode="text">
+    </form>
+    <div id="scan-msg" class="scan-msg"></div>
+    <div id="product-grid" class="product-grid">
+      <div class="grid-empty muted">Loading products…</div>
+    </div>
+  </section>
+
+  <!-- Right: cart -->
+  <section class="pos-cart">
+    <h2>Cart</h2>
+    <table class="table" id="cart-table">
+      <thead>
+        <tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th></th></tr>
+      </thead>
+      <tbody id="cart-body">
+        <tr class="empty-row"><td colspan="5" class="muted">Cart is empty.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="totals">
+      <div class="row"><span>Subtotal</span><span id="t-subtotal">{{ CURRENCY }} 0.00</span></div>
+      {% if TAX_RATE and TAX_RATE > 0 %}
+      <div class="row"><span>Tax ({{ (TAX_RATE * 100)|round(2) }}%)</span><span id="t-tax">{{ CURRENCY }} 0.00</span></div>
+      {% endif %}
+      <div class="row grand"><span>Total</span><span id="t-total">{{ CURRENCY }} 0.00</span></div>
+    </div>
+
+    <!-- Loyalty customer -->
+    <div class="customer-box">
+      <div class="customer-head">
+        <span>Loyalty customer</span>
+        <span class="muted small">1 pt / {{ CURRENCY }} {{ LOYALTY_KES_PER_POINT | round(0) | int }}</span>
+      </div>
+      <div id="customer-search" class="customer-search">
+        <input type="tel" id="cust-phone" inputmode="tel" placeholder="Phone number (optional)" autocomplete="off">
+        <button class="btn btn-ghost" id="btn-cust-find" type="button">Find</button>
+      </div>
+      <div id="customer-attached" class="customer-attached" hidden>
+        <span id="cust-name" class="cust-name"></span>
+        <span class="muted small"><span id="cust-points">0</span> pts</span>
+        <button class="link link-danger" id="btn-cust-clear" type="button">Remove</button>
+      </div>
+      <div id="customer-msg" class="customer-msg muted small"></div>
+    </div>
+
+    <div class="pos-actions">
+      <button class="btn btn-ghost" id="btn-clear" type="button">Clear</button>
+      <button class="btn btn-primary btn-lg" id="btn-pay" type="button" disabled
+              {% if not current_shift %}data-no-shift="1"{% endif %}>Charge</button>
+    </div>
+  </section>
+</div>
+
+<!-- New-customer prompt (shown when a phone isn't found) -->
+<div class="modal" id="new-cust-modal" hidden>
+  <div class="modal-box">
+    <h2>New customer</h2>
+    <p class="muted small">No customer found for <strong id="nc-phone-label"></strong>. Register them?</p>
+    <label for="nc-name">Name (optional)</label>
+    <input type="text" id="nc-name" autocomplete="off">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-nc-cancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="btn-nc-save" type="button">Add &amp; attach</button>
+    </div>
+    <p class="error-text" id="nc-error"></p>
+  </div>
+</div>
+
+<!-- Payment modal -->
+<div class="modal" id="pay-modal" hidden>
+  <div class="modal-box">
+    <h2>Payment</h2>
+    <div class="pay-total">Total due: <strong id="pay-total">{{ CURRENCY }} 0.00</strong></div>
+
+    {% if CURRENCIES|length > 1 %}
+    <label for="pay-currency">Pay in currency</label>
+    <select id="pay-currency">
+      {% for c in CURRENCIES %}
+      <option value="{{ c }}">{{ c }}{% if c == BASE_CURRENCY %} (base){% endif %}</option>
+      {% endfor %}
+    </select>
+    <div class="convert-line muted small" id="convert-line" hidden></div>
+    {% endif %}
+
+    <label>Payment method</label>
+    <div class="method-tabs">
+      {% for m in PAYMENT_METHODS %}
+      <button type="button" class="method {{ 'active' if loop.first }}{{ ' not-ready' if not m.ready }}"
+              data-method="{{ m.key }}" {{ 'disabled' if not m.ready }}
+              title="{{ 'Configure this method in Payment settings' if not m.ready }}">
+        {{ m.label }}{% if not m.ready %} ⚠{% endif %}
+      </button>
+      {% endfor %}
+    </div>
+
+    <!-- Cash -->
+    <div id="cash-fields" class="pay-fields">
+      <label for="tendered">Amount tendered (<span id="tender-cur">{{ CURRENCY }}</span>)</label>
+      <input type="number" id="tendered" step="0.01" min="0" placeholder="0.00">
+      <div class="change-line">Change: <strong id="change-due">{{ CURRENCY }} 0.00</strong></div>
+    </div>
+
+    <!-- M-Pesa (STK Push) -->
+    <div id="mpesa-fields" class="pay-fields" hidden>
+      <label for="mpesa-phone">Customer phone</label>
+      <input type="tel" id="mpesa-phone" inputmode="tel" placeholder="07XXXXXXXX" autocomplete="off">
+      <button class="btn btn-primary" id="btn-stk" type="button">Send M-Pesa prompt</button>
+      <div class="mpesa-status muted small" id="mpesa-status"></div>
+      <p class="muted small">M-Pesa is charged in {{ BASE_CURRENCY }}.</p>
+    </div>
+
+    <!-- Bank transfer -->
+    <div id="bank-fields" class="pay-fields" hidden>
+      <div class="bank-info muted small" id="bank-info"></div>
+      <label for="bank-ref">Transfer / deposit reference</label>
+      <input type="text" id="bank-ref" maxlength="64" placeholder="e.g. bank ref or slip no." autocomplete="off">
+      <p class="muted small">Bank transfers are recorded in {{ BASE_CURRENCY }}.</p>
+    </div>
+
+    <div class="pay-cashier muted small">Cashier: <strong>{{ current_user.name }}</strong></div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-cancel-pay" type="button">Cancel</button>
+      <button class="btn btn-primary" id="btn-confirm-pay" type="button">Complete sale</button>
+    </div>
+    <p class="error-text" id="pay-error"></p>
+  </div>
+</div>
+
+<!-- Success / receipt prompt -->
+<div class="modal" id="done-modal" hidden>
+  <div class="modal-box center">
+    <div class="big-check">✓</div>
+    <h2>Sale complete</h2>
+    <p id="done-summary" class="muted"></p>
+    <div class="modal-actions center">
+      <a class="btn btn-ghost" id="view-receipt" target="_blank" href="#">View receipt</a>
+      <button class="btn btn-primary" id="btn-new-sale" type="button">New sale</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.POS_CONFIG = {
+    currency: "{{ CURRENCY }}",
+    baseCurrency: "{{ BASE_CURRENCY }}",
+    currencies: {{ CURRENCIES|tojson }},
+    taxRate: {{ TAX_RATE or 0 }},
+    bank: {{ bank_details|tojson }},
+    loyaltyPer: {{ LOYALTY_KES_PER_POINT or 0 }},
+  };
+</script>
+<script src="{{ url_for('static', filename='js/pos.js') }}"></script>
+{% endblock %}

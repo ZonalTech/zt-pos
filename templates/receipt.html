@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Receipt {{ sale.sale_number }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="receipt-page">
+  <div class="receipt">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" class="r-logo" alt="">
+    <h2 class="r-store">{{ STORE_NAME }}</h2>
+    <div class="r-meta">
+      <div>{{ sale.sale_number }}</div>
+      <div>{{ sale.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
+      <div>Cashier: {{ sale.cashier }}</div>
+    </div>
+    <hr>
+    <table class="r-items">
+      {% for it in sale.items %}
+      <tr>
+        <td>{{ it.name }}<br><span class="muted small">{{ it.quantity }} × {{ CURRENCY }} {{ '%.2f'|format(it.unit_price) }}</span></td>
+        <td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(it.line_total) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <hr>
+    <table class="r-totals">
+      <tr><td>Subtotal</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(sale.subtotal) }}</td></tr>
+      {% if sale.tax and sale.tax > 0 %}
+      <tr><td>Tax</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(sale.tax) }}</td></tr>
+      {% endif %}
+      <tr class="r-grand"><td>TOTAL</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(sale.total) }}</td></tr>
+      <tr><td>Paid ({{ sale.payment_method }})</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(sale.amount_tendered) }}</td></tr>
+      {% if sale.payment_ref %}
+      <tr><td>{{ 'M-Pesa ref' if sale.payment_method == 'mpesa' else 'Bank ref' }}</td><td class="r-amt mono">{{ sale.payment_ref }}</td></tr>
+      {% endif %}
+      {% if sale.change_due and sale.change_due > 0 %}
+      <tr><td>Change</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(sale.change_due) }}</td></tr>
+      {% endif %}
+    </table>
+    {% if sale.currency and sale.currency != CURRENCY and sale.exchange_rate %}
+    <hr>
+    <table class="r-totals">
+      <tr><td>Paid in {{ sale.currency }}</td><td class="r-amt">{{ sale.currency }} {{ '%.2f'|format(sale.tendered_foreign) }}</td></tr>
+      {% if sale.change_foreign and sale.change_foreign > 0 %}
+      <tr><td>Change ({{ sale.currency }})</td><td class="r-amt">{{ sale.currency }} {{ '%.2f'|format(sale.change_foreign) }}</td></tr>
+      {% endif %}
+      <tr><td colspan="2" class="muted small">Rate: 1 {{ sale.currency }} = {{ '%.4f'|format(1 / sale.exchange_rate) }} {{ CURRENCY }}</td></tr>
+    </table>
+    {% endif %}
+    {% if sale.customer %}
+    <hr>
+    <table class="r-totals">
+      <tr><td>Customer</td><td class="r-amt">{{ sale.customer.name or sale.customer.phone }}</td></tr>
+      {% if sale.points_earned %}
+      <tr><td>Points earned</td><td class="r-amt">+{{ sale.points_earned }}</td></tr>
+      {% endif %}
+      <tr><td>Points balance</td><td class="r-amt">{{ sale.customer.points }}</td></tr>
+    </table>
+    {% endif %}
+    <hr>
+    <p class="r-thanks">Thank you!</p>
+    <button class="btn btn-primary no-print" onclick="window.print()">Print</button>
+  </div>
+</body>
+</html>

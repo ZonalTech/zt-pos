@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Not allowed{% endblock %}
+{% block content %}
+<div class="panel center">
+  <h1>403</h1>
+  <p class="muted">You don't have permission to view this page.</p>
+  <a class="btn btn-primary" href="{{ url_for('home') }}">Go to my home</a>
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-label">Revenue today</div>
+    <div class="card-value">{{ CURRENCY }} {{ '%.2f'|format(revenue_today) }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Sales today</div>
+    <div class="card-value">{{ sales_count_today }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Items sold today</div>
+    <div class="card-value">{{ items_sold_today }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Active products</div>
+    <div class="card-value">{{ total_products }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Stock value (retail)</div>
+    <div class="card-value">{{ CURRENCY }} {{ '%.2f'|format(stock_value) }}</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <section class="panel">
+    <h2>Last 7 days</h2>
+    <div class="bars">
+      {% set maxrev = (chart | map(attribute='revenue') | max) or 1 %}
+      {% for d in chart %}
+        <div class="bar-col">
+          <div class="bar" style="height: {{ (d.revenue / maxrev * 140) | round(0, 'ceil') }}px"
+               title="{{ CURRENCY }} {{ '%.2f'|format(d.revenue) }}"></div>
+          <div class="bar-label">{{ d.day }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Low stock {% if low_stock %}<span class="badge badge-warn">{{ low_stock|length }}</span>{% endif %}</h2>
+    {% if low_stock %}
+    <table class="table compact">
+      <thead><tr><th>Product</th><th>On hand</th><th>Reorder at</th></tr></thead>
+      <tbody>
+        {% for p in low_stock %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td class="{{ 'text-danger' if p.quantity == 0 }}">{{ p.quantity }}</td>
+          <td>{{ p.reorder_level }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">No low stock.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,105 @@
+name: Release
+
+# Every push to main rebuilds POS.exe + Uninstall.exe, packages the app zip +
+# manifest, builds the online installer (ZTPOS-Online-Setup.exe), and then
+# CREATES or UPDATES the GitHub Release for the current VERSION:
+#   - first push at a given VERSION  -> creates the release (tag v<VERSION>)
+#   - later pushes at the same VERSION -> refresh that release's assets in place
+# Bump the VERSION file when you want installed apps to see a NEW version to
+# update to (it becomes a new release; the app compares it to its version.txt).
+#
+# The online installer reads this repo's "latest release" and downloads the zip,
+# so a fresh install always gets the newest build and updates pull the new one.
+
+on:
+  push:
+    branches:
+      - main
+  # Manual re-run from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: write   # required to create/update the GitHub Release
+
+# Serialize release runs so every push completes its own build and updates the
+# release in order (cancel-in-progress: false = no commit's build is dropped).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The VERSION file is the single source of truth for the release tag.
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          VERSION="$(tr -d ' \r\n' < VERSION)"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building ZT POS v${VERSION}"
+
+      # build-setup.bat creates its own .venv, installs build-requirements.txt,
+      # compiles POS.exe + Uninstall.exe, and packages release\ZTPOS-<version>.zip
+      # + release\manifest.json (what the installer downloads).
+      - name: Build app payload + update package
+        shell: cmd
+        run: build-setup.bat
+
+      # The online (bootstrapper) installer: a tiny exe that downloads the zip
+      # above from GitHub at install/update time. This is the shippable file.
+      - name: Build online installer
+        shell: cmd
+        run: build-online-setup.bat
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          python release_notes.py "${{ steps.ver.outputs.version }}" > release/notes.md 2>/dev/null || true
+          if [ ! -s release/notes.md ]; then
+            echo "ZT POS ${{ steps.ver.outputs.tag }} — automated build from ${GITHUB_SHA::7}." > release/notes.md
+          fi
+
+      - name: Verify build output
+        shell: bash
+        run: |
+          test -f "release/ZTPOS-${{ steps.ver.outputs.version }}.zip" \
+            || { echo "::error::release/ZTPOS-${{ steps.ver.outputs.version }}.zip was not produced"; exit 1; }
+          test -f "setup/ZTPOS-Online-Setup.exe" \
+            || { echo "::error::setup/ZTPOS-Online-Setup.exe was not produced"; exit 1; }
+
+      # Create the release on the first push at this VERSION, otherwise refresh
+      # its assets in place (--clobber overwrites the same-named files). Uses the
+      # runner's preinstalled gh with the automatic GITHUB_TOKEN.
+      - name: Publish or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          ASSETS=(
+            "release/ZTPOS-${{ steps.ver.outputs.version }}.zip"
+            "release/manifest.json"
+            "setup/ZTPOS-Online-Setup.exe"
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Updating existing release $TAG"
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            gh release edit "$TAG" --title "ZT POS $TAG" \
+              --notes-file release/notes.md --latest --draft=false
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" "${ASSETS[@]}" --title "ZT POS $TAG" \
+              --notes-file release/notes.md --latest --target "$GITHUB_SHA"
+          fi
