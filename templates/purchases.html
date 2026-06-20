@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Purchases{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Purchases</h1>
+  <div class="actions">
+    {% if low_count %}
+    <a class="btn btn-ghost" href="{{ url_for('purchase_new', low=1) }}">Reorder low stock ({{ low_count }})</a>
+    {% endif %}
+    <button class="btn btn-ghost" type="button" onclick="saveTemplate('{{ url_for('purchase_template') }}')">Excel template</button>
+    <button class="btn btn-ghost" type="button" onclick="document.getElementById('po-import-bar').hidden = !document.getElementById('po-import-bar').hidden">Import Excel</button>
+    <a class="btn btn-primary" href="{{ url_for('purchase_new') }}">+ New purchase order</a>
+  </div>
+</div>
+
+<form id="po-import-bar" class="import-bar" method="post" action="{{ url_for('purchase_import') }}"
+      enctype="multipart/form-data" hidden>
+  <span class="muted small">Upload a filled-in template (.xlsx or .csv) with barcode, quantity and unit_cost.</span>
+  <div class="row">
+    <select name="supplier_id">
+      <option value="">— Supplier (optional) —</option>
+      {% for s in suppliers %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+    </select>
+    <input type="file" name="file" accept=".xlsx,.csv" required>
+    <button class="btn btn-primary" type="submit">Upload</button>
+  </div>
+</form>
+
+<table class="table">
+  <thead>
+    <tr><th>PO #</th><th>Date</th><th>Supplier</th><th>Items</th><th>Total</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for po in orders %}
+    <tr>
+      <td class="mono">{{ po.po_number }}</td>
+      <td>{{ po.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ po.supplier.name if po.supplier else '—' }}</td>
+      <td>{{ po.items | length }}</td>
+      <td>{{ CURRENCY }} {{ '%.2f'|format(po.total) }}</td>
+      <td>
+        {% if po.status == 'received' %}<span class="badge badge-receive">received</span>
+        {% elif po.status == 'cancelled' %}<span class="badge">cancelled</span>
+        {% else %}<span class="badge badge-warn">ordered</span>{% endif %}
+      </td>
+      <td><a class="link" href="{{ url_for('purchase_detail', po_id=po.id) }}">Open</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">No purchase orders yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

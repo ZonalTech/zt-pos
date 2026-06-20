@@ -14,7 +14,7 @@
   </div>
   <div class="card">
     <div class="card-label">Items sold today</div>
-    <div class="card-value">{{ items_sold_today }}</div>
+    <div class="card-value">{{ items_sold_today | qty }}</div>
   </div>
   <div class="card">
     <div class="card-label">Active products</div>
@@ -50,7 +50,7 @@
         {% for p in low_stock %}
         <tr>
           <td>{{ p.name }}</td>
-          <td class="{{ 'text-danger' if p.quantity == 0 }}">{{ p.quantity }}</td>
+          <td class="{{ 'text-danger' if p.quantity == 0 }}">{{ p.quantity | qty }}</td>
           <td>{{ p.reorder_level }}</td>
         </tr>
         {% endfor %}

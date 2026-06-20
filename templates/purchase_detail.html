@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ po.po_number }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ po.po_number }}</h1>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('purchase_print', po_id=po.id) }}">Print</a>
+    <a class="btn btn-ghost" href="{{ url_for('purchases') }}">← Back</a>
+  </div>
+</div>
+
+<section class="settings-card">
+  <dl class="info-grid">
+    <div><dt>Supplier</dt><dd>{{ po.supplier.name if po.supplier else '—' }}</dd></div>
+    <div><dt>Status</dt><dd>
+      {% if po.status == 'received' %}<span class="badge badge-receive">received</span>
+      {% elif po.status == 'cancelled' %}<span class="badge">cancelled</span>
+      {% else %}<span class="badge badge-warn">ordered</span>{% endif %}
+    </dd></div>
+    <div><dt>Created</dt><dd>{{ po.created_at.strftime('%Y-%m-%d %H:%M') }}</dd></div>
+    <div><dt>Received</dt><dd>{{ po.received_at.strftime('%Y-%m-%d %H:%M') if po.received_at else '—' }}</dd></div>
+    {% if po.note %}<div><dt>Note</dt><dd>{{ po.note }}</dd></div>{% endif %}
+  </dl>
+</section>
+
+<table class="table" style="margin-top:16px">
+  <thead>
+    <tr><th>Product</th><th>Unit cost</th><th>Qty</th><th>Line total</th></tr>
+  </thead>
+  <tbody>
+    {% for it in po.items %}
+    <tr>
+      <td>{{ it.name }}</td>
+      <td>{{ CURRENCY }} {{ '%.2f'|format(it.unit_cost) }}</td>
+      <td>{{ it.quantity | qty }}</td>
+      <td>{{ CURRENCY }} {{ '%.2f'|format(it.line_total) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr class="r-grand"><td colspan="3" style="text-align:right">Total</td>
+      <td>{{ CURRENCY }} {{ '%.2f'|format(po.total) }}</td></tr>
+  </tfoot>
+</table>
+
+{% if po.status == 'ordered' %}
+<div class="modal-actions" style="margin-top:16px">
+  <form method="post" action="{{ url_for('purchase_cancel', po_id=po.id) }}"
+        data-confirm="Cancel {{ po.po_number }}?">
+    <button class="btn btn-ghost" type="submit">Cancel order</button>
+  </form>
+  <form method="post" action="{{ url_for('purchase_receive', po_id=po.id) }}"
+        data-confirm="Receive {{ po.po_number }} into stock? This adds the quantities to inventory.">
+    <button class="btn btn-primary" type="submit">Receive into stock</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

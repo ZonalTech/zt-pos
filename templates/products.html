@@ -3,8 +3,21 @@
 {% block content %}
 <div class="page-head">
   <h1>Products</h1>
-  <button class="btn btn-primary" type="button" onclick="openProductForm()">+ Add product</button>
+  <div class="actions">
+    <button class="btn btn-ghost" type="button" onclick="saveTemplate('{{ url_for('products_template') }}')">Excel template</button>
+    <button class="btn btn-ghost" type="button" onclick="document.getElementById('import-bar').hidden = !document.getElementById('import-bar').hidden">Import Excel</button>
+    <button class="btn btn-primary" type="button" onclick="openProductForm()">+ Add product</button>
+  </div>
 </div>
+
+<form id="import-bar" class="import-bar" method="post" action="{{ url_for('products_import') }}"
+      enctype="multipart/form-data" hidden>
+  <span class="muted small">Upload a filled-in template (.xlsx or .csv). Matches existing products by barcode; on-hand stock isn't changed for existing items.</span>
+  <div class="row">
+    <input type="file" name="file" accept=".xlsx,.csv" required>
+    <button class="btn btn-primary" type="submit">Upload</button>
+  </div>
+</form>
 
 <form class="searchbar" method="get" action="{{ url_for('products') }}">
   <input type="text" name="q" value="{{ q }}" placeholder="Search by name or barcode…">
@@ -15,7 +28,7 @@
 <table class="table">
   <thead>
     <tr>
-      <th></th><th>Barcode</th><th>Name</th><th>Price</th><th>Cost</th>
+      <th></th><th>Barcode</th><th>Name</th><th>Category</th><th>Price</th><th>Cost</th><th>UOM</th>
       <th>On hand</th><th>Reorder</th><th></th>
     </tr>
   </thead>
@@ -31,23 +44,25 @@
       </td>
       <td class="mono">{{ p.barcode }}</td>
       <td>{{ p.name }}{% if not p.is_active %} <span class="badge">inactive</span>{% endif %}</td>
+      <td>{{ p.category or '—' }}</td>
       <td>{{ CURRENCY }} {{ '%.2f'|format(p.price) }}</td>
       <td>{{ CURRENCY }} {{ '%.2f'|format(p.cost_price) }}</td>
-      <td class="{{ 'text-danger' if p.low_stock }}">{{ p.quantity }}</td>
+      <td>{{ p.uom }}</td>
+      <td class="{{ 'text-danger' if p.low_stock }}">{{ p.quantity | qty }}</td>
       <td>{{ p.reorder_level }}</td>
       <td class="actions">
         <button class="link" type="button"
           onclick='editProduct({{ p.to_dict() | tojson }})'>Edit</button>
         {% if p.is_active %}
         <form method="post" action="{{ url_for('product_delete', pid=p.id) }}"
-              onsubmit="return confirm('Deactivate {{ p.name }}?')">
+              data-confirm="Deactivate {{ p.name }}?">
           <button class="link link-danger" type="submit">Deactivate</button>
         </form>
         {% endif %}
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="8" class="muted">No products yet.</td></tr>
+    <tr><td colspan="10" class="muted">No products yet.</td></tr>
     {% endfor %}
   </tbody>
 </table>
@@ -84,6 +99,27 @@
         <div>
           <label>Cost price</label>
           <input type="number" name="cost_price" id="f-cost" step="0.01" min="0" value="0">
+        </div>
+      </div>
+      <div class="form-grid">
+        <div>
+          <label>Category / group</label>
+          <select name="category" id="f-category">
+            <option value="">— None —</option>
+            {% for grp in groups %}
+            <option value="{{ grp }}">{{ grp }}</option>
+            {% endfor %}
+          </select>
+          <small class="muted">Manage on <a class="link" href="{{ url_for('item_groups') }}">Item groups</a>.</small>
+        </div>
+        <div>
+          <label>Unit of measure</label>
+          <select name="uom" id="f-uom">
+            {% for u in uoms %}
+            <option value="{{ u.name }}">{{ u.name }}{% if u.description %} — {{ u.description }}{% endif %}</option>
+            {% endfor %}
+          </select>
+          <small class="muted">Manage the list on <a class="link" href="{{ url_for('uoms') }}">Units</a>.</small>
         </div>
       </div>
       <div class="form-grid">
@@ -136,6 +172,21 @@
     document.getElementById('f-description').value = p.description || '';
     document.getElementById('f-price').value = p.price;
     document.getElementById('f-cost').value = p.cost_price;
+    (function () {
+      const sel = document.getElementById('f-category');
+      const val = p.category || '';
+      if (val && ![...sel.options].some((o) => o.value === val)) sel.add(new Option(val, val));
+      sel.value = val;
+    })();
+    (function () {
+      const sel = document.getElementById('f-uom');
+      const val = p.uom || 'pc';
+      // If the product's unit was deactivated/removed from the list, still show it.
+      if (val && ![...sel.options].some((o) => o.value === val)) {
+        sel.add(new Option(val + ' (inactive)', val));
+      }
+      sel.value = val;
+    })();
     document.getElementById('f-reorder').value = p.reorder_level;
     document.getElementById('qty-field').style.display = 'none';
     document.getElementById('f-image-remove').checked = false;

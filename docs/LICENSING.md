@@ -3,7 +3,7 @@
 ZT POS is gated by an offline license. Until a valid license is installed, every
 page and API redirects to the **activation screen** and all features are
 disabled. Licenses are issued with the React
-[License Generator](../license-generator/README.md).
+[License Generator](../../license-generator/README.md).
 
 ## Pieces
 

@@ -15,6 +15,7 @@
         {% if shift.closed_at %}{{ shift.closed_at.strftime('%Y-%m-%d %H:%M') }}
         {% else %}<span class="badge badge-receive">still open</span>{% endif %}
       </td></tr>
+      <tr><td>Hours worked</td><td class="r-amt">{{ shift.worked }}</td></tr>
     </tbody>
   </table>
 

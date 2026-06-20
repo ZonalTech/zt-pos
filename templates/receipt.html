@@ -10,6 +10,7 @@
     <img src="{{ url_for('static', filename='img/logo.png') }}" class="r-logo" alt="">
     <h2 class="r-store">{{ STORE_NAME }}</h2>
     <div class="r-meta">
+      {% if KRA_PIN %}<div>PIN: {{ KRA_PIN }}</div>{% endif %}
       <div>{{ sale.sale_number }}</div>
       <div>{{ sale.created_at.strftime('%Y-%m-%d %H:%M') }}</div>
       <div>Cashier: {{ sale.cashier }}</div>
@@ -18,7 +19,7 @@
     <table class="r-items">
       {% for it in sale.items %}
       <tr>
-        <td>{{ it.name }}<br><span class="muted small">{{ it.quantity }} × {{ CURRENCY }} {{ '%.2f'|format(it.unit_price) }}</span></td>
+        <td>{{ it.name }}<br><span class="muted small">{{ it.quantity | qty }} × {{ CURRENCY }} {{ '%.2f'|format(it.unit_price) }}</span></td>
         <td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(it.line_total) }}</td>
       </tr>
       {% endfor %}
@@ -59,8 +60,27 @@
     </table>
     {% endif %}
     <hr>
+    {% if qr %}
+    <div class="r-qr"><img src="{{ qr }}" alt="Receipt QR code"></div>
+    {% endif %}
     <p class="r-thanks">Thank you!</p>
-    <button class="btn btn-primary no-print" onclick="window.print()">Print</button>
+    {% if not request.args.get('embed') %}
+    <div class="r-actions no-print">
+      <button class="btn btn-primary" id="r-print" type="button">Print</button>
+      <a class="btn btn-ghost" href="{{ url_for('pos') }}">Back to POS</a>
+    </div>
+    <p class="r-print-msg muted small no-print" id="r-print-msg"></p>
+    <script>
+      document.getElementById("r-print").addEventListener("click", function () {
+        var msg = document.getElementById("r-print-msg");
+        msg.textContent = "Printing…";
+        fetch("{{ url_for('api_print_receipt', sale_id=sale.id) }}", { method: "POST" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) { msg.textContent = d.message || (d.ok ? "Printing…" : "Couldn't print."); })
+          .catch(function () { msg.textContent = "Couldn't reach the printer."; });
+      });
+    </script>
+    {% endif %}
   </div>
 </body>
 </html>

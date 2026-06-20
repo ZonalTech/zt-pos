@@ -37,6 +37,7 @@
   --r-sm: 8px;
   --r-md: 12px;
   --r-lg: 16px;
+  --pagehead-h: 62px;   /* height of the pinned page-title bar */
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, .06), 0 1px 3px rgba(15, 23, 42, .04);
   --shadow-md: 0 4px 12px rgba(15, 23, 42, .08), 0 2px 4px rgba(15, 23, 42, .04);
   --shadow-lg: 0 18px 45px rgba(15, 23, 42, .22);
@@ -175,6 +176,10 @@ body {
   border-top: 1px solid rgba(255, 255, 255, .06);
   display: flex; flex-direction: column; gap: 10px;
 }
+/* Shift pill and the collapse toggle share one row at the bottom. */
+.shift-row { display: flex; align-items: center; gap: 8px; }
+.shift-row .shift-pill { flex: 1; min-width: 0; }
+.shift-row .sidebar-toggle { margin-left: 0; }
 
 /* ---------- Collapsed sidebar (icon rail) ---------- */
 .sidebar-collapsed .sidebar { width: 70px; padding-left: 10px; padding-right: 10px; }
@@ -186,8 +191,8 @@ body {
 .sidebar-collapsed .nav a { justify-content: center; padding-left: 0; padding-right: 0; gap: 0; }
 .sidebar-collapsed .nav-label { display: none; }
 .sidebar-collapsed .nav a.active::after { top: 6px; bottom: 6px; }
-.sidebar-collapsed .shift-label { display: none; }
-.sidebar-collapsed .shift-pill { padding-left: 0; padding-right: 0; }
+.sidebar-collapsed .shift-pill { display: none; }
+.sidebar-collapsed .shift-row { justify-content: center; }
 .sidebar-collapsed .user-menu summary { justify-content: center; padding-left: 0; padding-right: 0; }
 .sidebar-collapsed .user-menu summary .who,
 .sidebar-collapsed .user-menu summary::after { display: none; }
@@ -251,7 +256,7 @@ body {
 .shift-pill.closed { background: rgba(239, 68, 68, .12); color: #fca5a5; border-color: rgba(239, 68, 68, .28); }
 
 /* ---------- Layout ---------- */
-.container { max-width: 1240px; margin: 28px auto; padding: 0 28px; }
+.container { max-width: 1240px; margin: 0 auto 28px; padding: 0 28px; }
 h1 { margin: 0 0 18px; font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
 h2 { margin: 0 0 14px; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
 
@@ -275,7 +280,6 @@ h2 { margin: 0 0 14px; font-size: 16px; font-weight: 650; letter-spacing: -.01em
   box-shadow: var(--shadow-sm); transition: box-shadow var(--ease), transform var(--ease);
   position: relative; overflow: hidden;
 }
-.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--primary); opacity: .85; }
 .card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
 .card-label { color: var(--muted); font-size: 12.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
 .card-value { font-size: 27px; font-weight: 750; margin-top: 8px; letter-spacing: -.02em; }
@@ -291,8 +295,11 @@ h2 { margin: 0 0 14px; font-size: 16px; font-weight: 650; letter-spacing: -.01em
 .table th, .table td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line-2); font-size: 14px; }
 .table thead th {
   color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em;
-  background: var(--surface-2); border-bottom: 1px solid var(--line); position: sticky; top: 0;
+  background: var(--surface-2); border-bottom: 1px solid var(--line);
+  position: sticky; top: var(--pagehead-h); z-index: 1;
 }
+/* Tables inside their own scroll box pin to that box, not below the page title. */
+.scrolly thead th, .cart-scroll thead th { top: 0; }
 .table tbody tr { transition: background var(--ease); }
 .table tbody tr:hover { background: var(--surface-2); }
 .table tbody tr:last-child td { border-bottom: none; }
@@ -361,13 +368,100 @@ select {
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: var(--ring); }
 input:disabled, select:disabled, textarea:disabled { background-color: var(--input-disabled); color: var(--muted); cursor: not-allowed; }
 input::placeholder, textarea::placeholder { color: var(--placeholder); }
+/* Date fields: accent-color themes the native calendar's selected day + today;
+   the picker icon is tinted to the accent and brightened on hover. */
+input[type="date"] {
+  min-width: 158px; cursor: pointer; accent-color: var(--primary);
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer; opacity: .55; border-radius: 4px; padding: 2px;
+  filter: invert(45%) sepia(94%) saturate(1900%) hue-rotate(205deg) brightness(95%);
+  transition: opacity var(--ease), background var(--ease);
+}
+input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; background: var(--primary-soft); }
 .searchbar select { margin-bottom: 0; width: auto; }
 label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: var(--text-2); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.searchbar { display: flex; gap: 10px; align-items: end; margin-bottom: 18px; flex-wrap: wrap; }
+.searchbar { display: flex; gap: 14px; align-items: center; margin-bottom: 18px; flex-wrap: wrap;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 12px 18px; box-shadow: var(--shadow-sm); }
+.searchbar .btn { height: 40px; display: inline-flex; align-items: center; }
+/* Label sits inline (left of the field) so each filter is a single 40px row. */
+.searchbar label.inline {
+  display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); white-space: nowrap;
+}
+.searchbar label.inline input,
+.searchbar label.inline select { height: 40px; margin: 0; }
+.searchbar input[type="date"] { width: 158px; }
+.searchbar select { min-width: 150px; }
+/* Push the action buttons to the right edge of the bar. */
+.searchbar .filter-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+
+/* Pagination footer under a table. */
+.pager {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: nowrap; gap: 16px; margin: 14px 2px 4px;
+  color: var(--muted); font-size: 13px; white-space: nowrap;
+}
+.pager strong { color: var(--text); }
+.pager-info { display: flex; align-items: center; gap: 16px; flex-wrap: nowrap; }
+.pager-per { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.pager-nav { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+.pager-page { white-space: nowrap; }
+/* Keep every control in the pager the same height. */
+.pager .btn,
+.pager-per select {
+  height: 36px; box-sizing: border-box; padding: 0 14px;
+  display: inline-flex; align-items: center; line-height: 1;
+}
+.pager-per select { min-width: 72px; padding: 0 10px; }
+.btn.disabled { opacity: .45; pointer-events: none; }
+/* Brief dim while the table pane swaps in new rows via ajax pagination. */
+#table-pane { transition: opacity .12s ease; }
+#table-pane.pane-loading { opacity: .5; pointer-events: none; }
+
+/* Reports: keep each section's title + column headers visible while scrolling. */
+.report-panel { padding-top: 0; }
+.report-panel h2 {
+  position: sticky; top: var(--pagehead-h); z-index: 3; height: 48px; box-sizing: border-box;
+  display: flex; align-items: center; margin: 0 -20px; padding: 0 20px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.report-panel .table thead th { top: calc(var(--pagehead-h) + 48px); z-index: 2; }
+
+/* Last-vs-current shift comparison chart */
+.cmp-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.cmp-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; }
+.cmp-dot { width: 11px; height: 11px; border-radius: 3px; display: inline-block; margin-right: 6px; vertical-align: middle; }
+.cmp-dot.grey { background: #94a3b8; }
+.cmp-dot.blue { background: #2563eb; }
+.cmp { display: flex; flex-direction: column; gap: 16px; }
+.cmp-name { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 6px; }
+.cmp-bar { display: flex; align-items: center; gap: 12px; margin: 5px 0; }
+.cmp-track { flex: 1; height: 18px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.cmp-fill { height: 100%; border-radius: 6px; min-width: 2px; transition: width var(--ease); }
+.cmp-fill.grey { background: #94a3b8; }
+.cmp-fill.blue { background: linear-gradient(90deg, #3b82f6, #2563eb); }
+.cmp-val { width: 130px; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Chart.js canvases need a sized, positioned parent to be responsive. */
+.chart-wrap { position: relative; height: 280px; }
 .searchbar input { margin-bottom: 0; }
 .searchbar label.inline { display: flex; flex-direction: column; font-weight: 500; font-size: 12px; color: var(--muted); }
-.page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; gap: 16px; flex-wrap: wrap; }
+.page-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+  /* Pinned page title: stays put while the content below scrolls. The negative
+     side margins + matching padding let the bar's background cover the
+     container's gutters so nothing peeks beside it. */
+  position: sticky; top: 0; z-index: 20;
+  background: var(--app-bg);
+  height: var(--pagehead-h); box-sizing: border-box;
+  margin: 0 -28px 18px; padding: 0 28px;
+  border-bottom: 1px solid var(--line);
+}
+.page-head h1 { margin: 0; }
 .total-pill { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 9px 18px; font-weight: 650; box-shadow: var(--shadow-sm); }
 
 /* ---------- Dashboard bars ---------- */
@@ -378,10 +472,25 @@ label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; c
 .bar-label { font-size: 12px; color: var(--muted); margin-top: 8px; font-weight: 500; }
 
 /* ---------- POS ---------- */
-.pos-layout { display: grid; grid-template-columns: 1fr 440px; gap: 22px; align-items: start; }
+.pos-layout { display: grid; grid-template-columns: 1fr 440px; gap: 22px; align-items: stretch; }
 @media (max-width: 980px) { .pos-layout { grid-template-columns: 1fr; } }
 .pos-scan, .pos-cart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); padding: 22px; box-shadow: var(--shadow-sm); }
-.pos-cart { position: sticky; top: 24px; }
+
+/* ---- POS fills the whole content area and stays full-screen ---- */
+.container:has(.pos-layout) { max-width: none; margin: 0; padding: 22px; height: 100%; display: flex; }
+.container:has(.pos-layout) .pos-layout { flex: 1; min-height: 0; }
+/* Both panels are full-height flex columns. */
+.pos-scan, .pos-cart { display: flex; flex-direction: column; min-height: 0; }
+/* Left: the product grid takes the slack and scrolls on its own. */
+.pos-scan .product-grid { flex: 1; min-height: 0; overflow-y: auto; align-content: start; }
+/* Right: cart items scroll; totals, customer box and Charge sit at the bottom. */
+.pos-cart .cart-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+@media (max-width: 980px) {
+  .container:has(.pos-layout) { height: auto; display: block; }
+  .container:has(.pos-layout) .pos-layout { display: grid; }
+  .pos-scan, .pos-cart { min-height: 0; }
+  .pos-scan .product-grid, .pos-cart .cart-scroll { overflow: visible; }
+}
 #scan-input { height: auto; font-size: 17px; padding: 14px 16px; margin-bottom: 0; }
 .scan-msg { min-height: 0; color: var(--danger); font-size: 13px; margin: 6px 0 0; font-weight: 500; }
 .scan-msg.show { min-height: 18px; }
@@ -402,6 +511,7 @@ label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; c
 .product-card:active { transform: translateY(0); }
 .product-card .pc-name { font-weight: 650; font-size: 14px; line-height: 1.25; color: var(--text); }
 .product-card .pc-price { color: var(--primary); font-weight: 750; font-size: 16px; letter-spacing: -.01em; }
+.product-card .pc-uom { color: var(--muted); font-weight: 500; font-size: 12px; }
 .product-card .pc-stock { font-size: 11.5px; color: var(--muted); font-weight: 500; }
 .product-card.out { opacity: .55; cursor: not-allowed; box-shadow: none; }
 .product-card.out:hover { border-color: var(--line); box-shadow: none; transform: none; }
@@ -454,10 +564,31 @@ label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; c
 .customer-head { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; font-size: 14px; color: var(--text-2); margin-bottom: 8px; }
 .customer-search { display: flex; gap: 8px; }
 .customer-search input { flex: 1; }
+/* Searchable customer picker */
+.cust-picker { position: relative; flex: 1; }
+.cust-picker input { width: 100%; }
+.cust-suggestions {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-sm);
+  box-shadow: var(--shadow-md); max-height: 240px; overflow-y: auto;
+}
+.cust-suggestions[hidden] { display: none; }
+.cust-suggestion {
+  display: flex; justify-content: space-between; gap: 12px; width: 100%;
+  padding: 9px 12px; border: 0; background: none; cursor: pointer;
+  font-size: 14px; color: var(--text); text-align: left;
+}
+.cust-suggestion:hover { background: var(--primary-soft); }
 .customer-attached { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--primary-soft); }
 .customer-attached .cust-name { font-weight: 650; flex: 1; }
 .customer-msg { margin-top: 6px; min-height: 16px; }
-.qty-btn { background: var(--surface-2); border: 1px solid var(--line); width: 28px; height: 28px; border-radius: 7px; cursor: pointer; font-weight: 700; color: var(--text-2); transition: all var(--ease); }
+.qty-stepper { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.import-bar { margin: 0 0 16px; padding: 14px 16px; border: 1px dashed var(--line); border-radius: var(--r-md); background: var(--surface-2); display: flex; flex-direction: column; gap: 10px; }
+.import-bar .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.import-bar[hidden] { display: none; }
+.qty-input { width: 52px !important; flex: 0 0 52px; height: 30px; text-align: center; padding: 4px; font-weight: 600; -moz-appearance: textfield; }
+.qty-input::-webkit-outer-spin-button, .qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.qty-btn { flex: none; background: var(--surface-2); border: 1px solid var(--line); width: 28px; height: 28px; border-radius: 7px; cursor: pointer; font-weight: 700; color: var(--text-2); transition: all var(--ease); }
 .qty-btn:hover { background: var(--primary-soft); border-color: var(--primary); color: var(--primary); }
 .qty-val { display: inline-block; min-width: 28px; text-align: center; font-weight: 600; }
 .cart-remove { color: var(--danger); cursor: pointer; border: none; background: none; font-size: 18px; line-height: 1; border-radius: 6px; padding: 2px 6px; }
@@ -492,7 +623,9 @@ label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; c
 .resolved-product { padding: 11px 13px; border: 1px dashed var(--line); border-radius: var(--r-sm); margin-bottom: 12px; background: var(--surface-2); }
 
 /* ---------- Receipt ---------- */
-.receipt-page { background: #e2e8f0; padding: 30px; }
+/* Override the global body (100vh + overflow:hidden) so long receipts grow
+   and scroll within the drawer/window instead of being clipped. */
+.receipt-page { background: #e2e8f0; padding: 30px; height: auto; min-height: 100vh; display: block; overflow: auto; }
 .receipt { background: #fff; width: 320px; margin: 0 auto; padding: 26px; border-radius: var(--r-md); font-size: 14px; box-shadow: var(--shadow-md); }
 .r-logo { display: block; width: 56px; height: 56px; margin: 0 auto 8px; border-radius: 13px; }
 .r-store { text-align: center; margin: 0 0 8px; font-size: 18px; }
@@ -504,7 +637,31 @@ label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; c
 .r-totals td { padding: 3px 0; }
 .r-grand td { font-weight: 700; font-size: 16px; border-top: 1px solid var(--line); padding-top: 6px; }
 .r-thanks { text-align: center; color: var(--muted); }
+.r-qr { text-align: center; margin: 4px 0 10px; }
+.r-qr img { width: 120px; height: 120px; }
 .receipt hr { border: none; border-top: 1px dashed #cbd5e1; margin: 12px 0; }
+.r-actions { display: flex; gap: 10px; margin-top: 4px; }
+.r-actions .btn { flex: 1; text-align: center; }
+
+/* ---------- Right-side receipt drawer ---------- */
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.receipt-drawer { position: fixed; inset: 0; z-index: 80; }
+.receipt-drawer[hidden] { display: none; }
+.receipt-drawer-backdrop { position: absolute; inset: 0; background: rgba(2, 6, 23, .5); opacity: 0; transition: opacity .25s ease; }
+.receipt-drawer.open .receipt-drawer-backdrop { opacity: 1; }
+.receipt-drawer-panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 92vw);
+  background: var(--panel); border-left: 1px solid var(--line);
+  display: flex; flex-direction: column; box-shadow: -8px 0 30px rgba(0, 0, 0, .35);
+  transform: translateX(100%); transition: transform .25s ease;
+}
+.receipt-drawer.open .receipt-drawer-panel { transform: translateX(0); }
+.receipt-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); font-weight: 700;
+}
+.receipt-drawer-actions { display: flex; gap: 8px; }
+.receipt-frame { flex: 1; width: 100%; border: 0; background: #e2e8f0; }
 @media print { .no-print { display: none; } .receipt-page { background: #fff; padding: 0; } .receipt { box-shadow: none; } }
 
 /* --- Payments: status helpers + POS tender fields + settings page --- */
@@ -522,14 +679,63 @@ label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; c
 .bank-info { margin-bottom: 10px; padding: 10px 12px; background: var(--primary-soft); border-radius: var(--r-sm); line-height: 1.5; }
 #btn-stk { width: 100%; margin-top: 4px; }
 
-/* Settings page: section panels and the enable checkbox row. */
-.settings-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); padding: 18px 20px; box-shadow: var(--shadow-sm); }
+/* ---------- Settings page ---------- */
+/* Sub-heading under the page title, and a column of cards constrained so the
+   content doesn't sprawl across very wide windows. */
+.page-sub { margin: -4px 0 18px; }
+.settings-stack { display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
+
+.settings-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg, 14px); padding: 20px 22px; box-shadow: var(--shadow-sm); }
+
+/* Card header: title (+ optional sub) on the left, status/action on the right. */
+.sc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding-bottom: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+.sc-title h2 { margin: 0; font-size: 16px; line-height: 1.2; }
+.sc-title p { margin: 4px 0 0; }
+.sc-actions { margin-top: 18px; }
+
+/* Form field with label + hint inside a settings card. */
+.field { margin: 0; }
+.field label { display: block; font-size: 12px; font-weight: 700; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.field input[type="text"], .field input[type="number"] { max-width: 360px; }
+.field-hint { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
+
 .check { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 8px 0 14px; cursor: pointer; }
 .check input { width: auto; }
 
+/* Pill showing the license state, with a leading status dot. */
+.status-pill { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  padding: 5px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  border: 1px solid transparent; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent); }
+.status-pill--ok { color: #16a34a; background: var(--success-soft); border-color: color-mix(in srgb, #16a34a 28%, transparent); }
+.status-pill--off { color: #dc2626; background: color-mix(in srgb, #dc2626 12%, transparent); border-color: color-mix(in srgb, #dc2626 26%, transparent); }
+[data-theme="dark"] .status-pill--ok { color: #4ade80; }
+[data-theme="dark"] .status-pill--off { color: #fca5a5; }
+
+/* Read-only key/value grid, each cell boxed for clearer scanning. */
+.info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.info-item { min-width: 0; padding: 12px 14px; border: 1px solid var(--line);
+  border-radius: var(--r-md); background: color-mix(in srgb, var(--line) 14%, transparent); }
+.info-grid dt { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+.info-grid dd { margin: 0; font-size: 15px; font-weight: 600; word-break: break-word; }
+.info-grid dd .arrow { color: var(--muted); margin: 0 6px; }
+.info-grid code { font-family: var(--mono, monospace); font-weight: 600; letter-spacing: .04em; }
+.capitalize { text-transform: capitalize; }
+@media (max-width: 560px) { .info-grid { grid-template-columns: 1fr; } }
+
+/* Inline notice block (e.g. license expiring soon). */
+.notice { margin-top: 16px; padding: 12px 14px; border-radius: var(--r-md); font-size: 13px; line-height: 1.5; border: 1px solid var(--line); }
+.notice--warn { background: color-mix(in srgb, #f59e0b 12%, transparent); border-color: color-mix(in srgb, #f59e0b 30%, transparent); }
+
+/* License paste box on the Settings page. */
+.license-box { width: 100%; font-family: var(--mono, monospace); font-size: .8rem; line-height: 1.5; resize: vertical; word-break: break-all; }
+
 /* ---------- Toasts ---------- */
 .toast-stack {
-  position: fixed; bottom: 18px; right: 18px; z-index: 60;
+  position: fixed; bottom: 18px; right: 18px; z-index: 100;
   display: flex; flex-direction: column-reverse; gap: 10px;
   width: min(360px, calc(100vw - 36px)); pointer-events: none;
 }

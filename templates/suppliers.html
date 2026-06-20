@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Suppliers{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Suppliers</h1>
+  <button class="btn btn-primary" type="button" onclick="openSupplierForm()">+ Add supplier</button>
+</div>
+
+<table class="table">
+  <thead>
+    <tr><th>Name</th><th>Phone</th><th>Email</th><th>Note</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for s in suppliers %}
+    <tr class="{{ 'row-inactive' if not s.is_active }}">
+      <td>{{ s.name }}{% if not s.is_active %} <span class="badge">inactive</span>{% endif %}</td>
+      <td>{{ s.phone or '—' }}</td>
+      <td>{{ s.email or '—' }}</td>
+      <td>{{ s.note or '—' }}</td>
+      <td class="actions">
+        <button class="link" type="button" onclick='editSupplier({{ s.to_dict() | tojson }})'>Edit</button>
+        <form method="post" action="{{ url_for('supplier_deactivate', sid=s.id) }}"
+              data-confirm="{{ 'Reactivate' if not s.is_active else 'Deactivate' }} {{ s.name }}?">
+          <button class="link {{ 'link-danger' if s.is_active }}" type="submit">
+            {{ 'Reactivate' if not s.is_active else 'Deactivate' }}
+          </button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No suppliers yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal" id="supplier-modal" hidden>
+  <div class="modal-box">
+    <h2 id="supplier-modal-title">Add supplier</h2>
+    <form method="post" action="{{ url_for('supplier_save') }}">
+      <input type="hidden" name="id" id="s-id">
+      <label>Name *</label>
+      <input type="text" name="name" id="s-name" required>
+      <div class="form-grid">
+        <div>
+          <label>Phone</label>
+          <input type="text" name="phone" id="s-phone" autocomplete="off">
+        </div>
+        <div>
+          <label>Email</label>
+          <input type="email" name="email" id="s-email" autocomplete="off">
+        </div>
+      </div>
+      <label>Note</label>
+      <input type="text" name="note" id="s-note">
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" onclick="document.getElementById('supplier-modal').hidden=true">Cancel</button>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  function openSupplierForm() {
+    document.getElementById('supplier-modal-title').textContent = 'Add supplier';
+    document.querySelector('#supplier-modal form').reset();
+    document.getElementById('s-id').value = '';
+    document.getElementById('supplier-modal').hidden = false;
+    document.getElementById('s-name').focus();
+  }
+  function editSupplier(s) {
+    document.getElementById('supplier-modal-title').textContent = 'Edit supplier';
+    document.getElementById('s-id').value = s.id;
+    document.getElementById('s-name').value = s.name;
+    document.getElementById('s-phone').value = s.phone || '';
+    document.getElementById('s-email').value = s.email || '';
+    document.getElementById('s-note').value = s.note || '';
+    document.getElementById('supplier-modal').hidden = false;
+  }
+</script>
+{% endblock %}

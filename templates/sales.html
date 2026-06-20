@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Sales</h1>
-  <div class="total-pill">Total: {{ CURRENCY }} {{ '%.2f'|format(total) }} <span class="muted">({{ sales|length }} sales)</span></div>
+  <div class="total-pill">Total: {{ CURRENCY }} {{ '%.2f'|format(total) }} <span class="muted">({{ total_count }} sales)</span></div>
 </div>
 
 <form class="searchbar" method="get" action="{{ url_for('sales') }}">
@@ -18,14 +18,108 @@
     </select>
   </label>
   {% if shift_id %}<input type="hidden" name="shift" value="{{ shift_id }}">{% endif %}
-  <button class="btn" type="submit">Filter</button>
-  {% if from_str or to_str or user_id or shift_id %}<a class="btn btn-ghost" href="{{ url_for('sales') }}">Clear</a>{% endif %}
+  <div class="filter-actions">
+    <button class="btn btn-primary" type="submit">Filter</button>
+    {% if from_str or to_str or user_id or shift_id %}<a class="btn" href="{{ url_for('sales') }}">Clear</a>{% endif %}
+  </div>
 </form>
 
 {% if shift_id %}
 <p class="muted small">Shift #{{ shift_id }} · <a href="{{ url_for('sales') }}">Show all</a></p>
 {% endif %}
 
+<!-- ============================== Charts ============================== -->
+<div class="grid-2">
+  <section class="panel report-panel">
+    <h2>Revenue trend</h2>
+    <div class="chart-wrap"><canvas id="chart-revenue"></canvas></div>
+  </section>
+  <section class="panel report-panel">
+    <h2>By payment method</h2>
+    <div class="chart-wrap"><canvas id="chart-method"></canvas></div>
+  </section>
+</div>
+<section class="panel report-panel" style="margin-top:18px">
+  <h2>Sales by cashier</h2>
+  <div class="chart-wrap"><canvas id="chart-cashier"></canvas></div>
+</section>
+
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script id="sales-data" type="application/json">{{ charts | tojson }}</script>
+<script>
+  (function () {
+    const D = JSON.parse(document.getElementById("sales-data").textContent);
+    const css = getComputedStyle(document.documentElement);
+    const muted = (css.getPropertyValue("--muted") || "#94a3b8").trim();
+    const grid = (css.getPropertyValue("--line") || "#e6eaf0").trim();
+    Chart.defaults.color = muted;
+    Chart.defaults.borderColor = grid;
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    const CUR = "{{ CURRENCY }}";
+    const money = (v) => CUR + " " + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const moneyTick = (v) => CUR + " " + Number(v).toLocaleString();
+
+    // Line chart — revenue by day
+    new Chart(document.getElementById("chart-revenue"), {
+      type: "line",
+      data: {
+        labels: D.dates,
+        datasets: [{
+          label: "Revenue", data: D.date_totals,
+          borderColor: "#2563eb", backgroundColor: "rgba(37,99,235,.15)",
+          fill: true, tension: .3, pointRadius: 3, borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: (c) => money(c.parsed.y) } } },
+        scales: { y: { beginAtZero: true, ticks: { callback: moneyTick } } },
+      },
+    });
+
+    // Donut chart — total by payment method
+    const methodLabels = { cash: "Cash", mpesa: "M-Pesa", bank: "Bank" };
+    new Chart(document.getElementById("chart-method"), {
+      type: "doughnut",
+      data: {
+        labels: D.methods.map((m) => methodLabels[m] || m),
+        datasets: [{
+          data: D.method_totals,
+          backgroundColor: ["#2563eb", "#22c55e", "#f59e0b"],
+          borderColor: "transparent", borderWidth: 0,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: "62%",
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: { callbacks: { label: (c) => c.label + ": " + money(c.parsed) } },
+        },
+      },
+    });
+
+    // Bar chart — total by cashier
+    new Chart(document.getElementById("chart-cashier"), {
+      type: "bar",
+      data: {
+        labels: D.users,
+        datasets: [{
+          label: "Total", data: D.user_totals,
+          backgroundColor: "#3b82f6", borderRadius: 6, maxBarThickness: 48,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: (c) => money(c.parsed.y) } } },
+        scales: { y: { beginAtZero: true, ticks: { callback: moneyTick } } },
+      },
+    });
+  })();
+</script>
+
+<div id="table-pane">
 <table class="table">
   <thead>
     <tr>
@@ -43,11 +137,38 @@
       <td>{{ CURRENCY }} {{ '%.2f'|format(s.total) }}</td>
       <td>{{ s.user.name if s.user else s.cashier }}</td>
       <td>{% if s.shift_id %}<a class="link" href="{{ url_for('shift_summary', shift_id=s.shift_id) }}">#{{ s.shift_id }}</a>{% else %}—{% endif %}</td>
-      <td><a class="link" href="{{ url_for('receipt', sale_id=s.id) }}" target="_blank">Receipt</a></td>
+      <td><a class="link" href="{{ url_for('receipt', sale_id=s.id) }}" data-receipt="{{ s.id }}">Receipt</a></td>
     </tr>
     {% else %}
     <tr><td colspan="8" class="muted">No sales in this range.</td></tr>
     {% endfor %}
   </tbody>
 </table>
+
+{% if total_count %}
+<div class="pager">
+  <div class="pager-info">
+    Showing <strong>{{ (page - 1) * per_page + 1 }}</strong>–<strong>{{ [page * per_page, total_count] | min }}</strong>
+    of <strong>{{ total_count }}</strong>
+    <label class="pager-per">Rows per page
+      <select>
+        {% for n in per_page_options %}
+        <option value="{{ n }}" {{ 'selected' if n == per_page }}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <div class="pager-nav">
+    {% if page > 1 %}
+    <a class="btn" href="{{ url_for('sales', page=page-1, per=per_page, **filter_args) }}">‹ Prev</a>
+    {% else %}<span class="btn disabled">‹ Prev</span>{% endif %}
+    <span class="pager-page">Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}
+    <a class="btn" href="{{ url_for('sales', page=page+1, per=per_page, **filter_args) }}">Next ›</a>
+    {% else %}<span class="btn disabled">Next ›</span>{% endif %}
+  </div>
+</div>
+{% endif %}
+</div>
+<script src="{{ url_for('static', filename='js/paginate.js') }}?v=2"></script>
 {% endblock %}

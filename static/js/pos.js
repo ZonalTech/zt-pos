@@ -62,7 +62,7 @@
       card.innerHTML = `
         ${thumb}
         <span class="pc-name">${escapeHtml(p.name)}</span>
-        <span class="pc-price">${money(p.price)}</span>
+        <span class="pc-price">${money(p.price)}${p.uom ? ` <span class="pc-uom">/ ${escapeHtml(p.uom)}</span>` : ""}</span>
         <span class="pc-stock">${out ? "Out of stock" : "In stock: " + p.quantity}</span>`;
       if (!out) {
         card.addEventListener("click", () => { addToCart(p); scanInput.focus(); });
@@ -120,14 +120,26 @@
   }
 
   // --- Cart ------------------------------------------------------------
+  function qtyFmt(n) { return (Math.round((n || 0) * 1000) / 1000).toString(); }
+
   function addToCart(p) {
+    // No selling without an open shift — prompt to start one.
+    if (!window.HAS_OPEN_SHIFT) {
+      const m = document.getElementById("start-shift-modal");
+      if (m) m.hidden = false;
+      flashScan("Open a shift before selling.");
+      return;
+    }
     const existing = cart.find((c) => c.id === p.id);
     if (existing) {
-      if (existing.quantity + 1 > p.quantity) { flashScan(`Only ${p.quantity} in stock`); return; }
+      if (existing.quantity + 1 > p.quantity) { flashScan(`Only ${qtyFmt(p.quantity)} in stock`); return; }
       existing.quantity += 1;
     } else {
       if (p.quantity < 1) { flashScan(`${p.name} is out of stock`); return; }
-      cart.push({ id: p.id, barcode: p.barcode, name: p.name, price: p.price, quantity: 1, stock: p.quantity });
+      cart.push({
+        id: p.id, barcode: p.barcode, name: p.name, price: p.price,
+        quantity: 1, stock: p.quantity, fractional: !!p.fractional,
+      });
     }
     renderCart();
   }
@@ -137,9 +149,28 @@
     if (!item) return;
     const next = item.quantity + delta;
     if (next <= 0) { removeItem(id); return; }
-    if (next > item.stock) { flashScan(`Only ${item.stock} in stock`); return; }
+    if (next > item.stock) { flashScan(`Only ${qtyFmt(item.stock)} in stock`); return; }
     item.quantity = next;
     renderCart();
+  }
+
+  // Set an exact quantity (used when the cashier types into the qty box).
+  function setQty(id, raw, commit) {
+    const item = cart.find((c) => c.id === id);
+    if (!item) return;
+    let q = parseFloat(raw);
+    if (isNaN(q)) { if (commit) renderCart(); return; }
+    if (!item.fractional) q = Math.round(q);
+    if (q > item.stock) { flashScan(`Only ${qtyFmt(item.stock)} in stock`); q = item.stock; }
+    if (commit && q <= 0) { removeItem(id); return; }
+    item.quantity = q > 0 ? q : item.quantity;
+    if (commit) {
+      renderCart();
+    } else {
+      const cell = cartBody.querySelector(`.line-cell[data-id="${id}"]`);
+      if (cell) cell.textContent = money(item.price * item.quantity);
+      updateTotals();
+    }
   }
 
   function removeItem(id) {
@@ -160,11 +191,15 @@
           <td>${escapeHtml(item.name)}</td>
           <td>${money(item.price)}</td>
           <td>
-            <button class="qty-btn" data-act="dec" data-id="${item.id}">−</button>
-            <span class="qty-val">${item.quantity}</span>
-            <button class="qty-btn" data-act="inc" data-id="${item.id}">+</button>
+            <div class="qty-stepper">
+              <button class="qty-btn" data-act="dec" data-id="${item.id}">−</button>
+              <input class="qty-input" type="number" data-id="${item.id}"
+                     value="${qtyFmt(item.quantity)}" min="0"
+                     step="${item.fractional ? '0.001' : '1'}">
+              <button class="qty-btn" data-act="inc" data-id="${item.id}">+</button>
+            </div>
           </td>
-          <td>${money(item.price * item.quantity)}</td>
+          <td class="line-cell" data-id="${item.id}">${money(item.price * item.quantity)}</td>
           <td><button class="cart-remove" data-act="rm" data-id="${item.id}">×</button></td>`;
         cartBody.appendChild(tr);
       });
@@ -180,6 +215,15 @@
     if (btn.dataset.act === "inc") changeQty(id, 1);
     else if (btn.dataset.act === "dec") changeQty(id, -1);
     else if (btn.dataset.act === "rm") removeItem(id);
+  });
+  // Typing an exact quantity: update totals live, normalise on blur/enter.
+  cartBody.addEventListener("input", (e) => {
+    const inp = e.target.closest(".qty-input");
+    if (inp) setQty(Number(inp.dataset.id), inp.value, false);
+  });
+  cartBody.addEventListener("change", (e) => {
+    const inp = e.target.closest(".qty-input");
+    if (inp) setQty(Number(inp.dataset.id), inp.value, true);
   });
 
   function totals() {
@@ -198,70 +242,103 @@
 
   btnClear.addEventListener("click", () => { cart.length = 0; renderCart(); scanInput.focus(); });
 
-  // --- Loyalty customer ------------------------------------------------
-  let customer = null;  // { id, phone, name, points } once attached
+  // --- Loyalty customer (searchable picker by phone) -------------------
+  let customer = null;  // { id, phone, name, points } once selected
   const custPhone = document.getElementById("cust-phone");
   const btnCustFind = document.getElementById("btn-cust-find");
-  const btnCustClear = document.getElementById("btn-cust-clear");
-  const custSearch = document.getElementById("customer-search");
-  const custAttached = document.getElementById("customer-attached");
-  const custNameEl = document.getElementById("cust-name");
-  const custPointsEl = document.getElementById("cust-points");
   const custMsg = document.getElementById("customer-msg");
+  const custSuggestions = document.getElementById("cust-suggestions");
   const ncModal = document.getElementById("new-cust-modal");
   const ncPhoneLabel = document.getElementById("nc-phone-label");
   const ncName = document.getElementById("nc-name");
   const ncError = document.getElementById("nc-error");
 
   function renderCustomer() {
-    if (customer) {
-      custSearch.hidden = true;
-      custAttached.hidden = false;
-      custNameEl.textContent = customer.name || customer.phone;
-      custPointsEl.textContent = customer.points;
-    } else {
-      custSearch.hidden = false;
-      custAttached.hidden = true;
-    }
+    custMsg.textContent = customer ? `Customer: ${customer.name || customer.phone}` : "";
+  }
+
+  function hideSuggestions() {
+    custSuggestions.hidden = true;
+    custSuggestions.innerHTML = "";
+    custPhone.setAttribute("aria-expanded", "false");
+  }
+
+  function renderSuggestions(list) {
+    if (!list.length) { hideSuggestions(); return; }
+    custSuggestions.innerHTML = "";
+    list.forEach((c) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "cust-suggestion";
+      item.innerHTML =
+        `<span>${escapeHtml(c.name || "—")}</span>` +
+        `<span class="muted">${escapeHtml(c.phone)}</span>`;
+      item.addEventListener("click", () => attachCustomer(c));
+      custSuggestions.appendChild(item);
+    });
+    custSuggestions.hidden = false;
+    custPhone.setAttribute("aria-expanded", "true");
   }
 
   function attachCustomer(c) {
     customer = c;
-    custMsg.textContent = "";
+    custPhone.value = c.name ? `${c.name} · ${c.phone}` : c.phone;
+    hideSuggestions();
     renderCustomer();
   }
 
   function detachCustomer() {
     customer = null;
     custPhone.value = "";
-    custMsg.textContent = "";
+    hideSuggestions();
     renderCustomer();
   }
 
   async function findCustomer() {
     const phone = custPhone.value.trim();
     if (!phone) { custMsg.textContent = "Enter a phone number."; return; }
-    custMsg.textContent = "Looking up…";
     try {
       const res = await fetch(`/api/customer/lookup?phone=${encodeURIComponent(phone)}`);
       const data = await res.json();
       if (data.found) { attachCustomer(data.customer); return; }
-      // Not found — offer to register them.
       ncPhoneLabel.textContent = data.phone || phone;
-      ncName.value = "";
-      ncError.textContent = "";
-      ncModal.hidden = false;
-      ncName.focus();
+      ncName.value = ""; ncError.textContent = "";
+      ncModal.hidden = false; ncName.focus();
     } catch (_) {
       custMsg.textContent = "Lookup failed — is the server running?";
     }
   }
 
   btnCustFind.addEventListener("click", findCustomer);
-  custPhone.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); findCustomer(); }
+
+  // Search saved customers by phone (or name) as the cashier types, and pick one.
+  let custTimer = null;
+  custPhone.addEventListener("input", () => {
+    customer = null;                       // typing changes the selection
+    clearTimeout(custTimer);
+    const q = custPhone.value.trim();
+    if (q.length < 2) { hideSuggestions(); custMsg.textContent = ""; return; }
+    custTimer = setTimeout(async () => {
+      if (custPhone.value.trim() !== q) return;
+      try {
+        const res = await fetch(`/api/customer/search?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        renderSuggestions(data.results || []);
+        custMsg.textContent = (data.results || []).length ? "" : "No saved customer — click Find to add.";
+      } catch (_) { hideSuggestions(); }
+    }, 250);
   });
-  btnCustClear.addEventListener("click", detachCustomer);
+  custPhone.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const first = custSuggestions.querySelector(".cust-suggestion");
+    if (!custSuggestions.hidden && first) first.click();   // pick the top match
+    else findCustomer();
+  });
+  // Close the dropdown when clicking outside the picker.
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".cust-picker")) hideSuggestions();
+  });
 
   document.getElementById("btn-nc-cancel").addEventListener("click", () => {
     ncModal.hidden = true; custPhone.focus();
@@ -285,7 +362,6 @@
 
   // --- Payment modal ---------------------------------------------------
   const payModal = document.getElementById("pay-modal");
-  const doneModal = document.getElementById("done-modal");
   const tendered = document.getElementById("tendered");
   const changeDue = document.getElementById("change-due");
   const payError = document.getElementById("pay-error");
@@ -544,27 +620,11 @@
     payModal.hidden = true;
     cart.length = 0;
     renderCart();
-    let summary = `${sale.sale_number} · ${money(sale.total, base)} (${sale.payment_method})`;
-    if (sale.currency && sale.currency !== base) {
-      summary += ` · paid ${money(sale.tendered_foreign, sale.currency)}`;
-      if (sale.change_foreign > 0) summary += ` · Change ${money(sale.change_foreign, sale.currency)}`;
-    } else if (sale.change_due > 0) {
-      summary += ` · Change ${money(sale.change_due, base)}`;
-    }
-    if (sale.customer_id && sale.points_earned) {
-      summary += ` · +${sale.points_earned} pts (${sale.customer_points} total)`;
-    }
-    document.getElementById("done-summary").textContent = summary;
-    document.getElementById("view-receipt").href = `/receipt/${sale.id}`;
-    doneModal.hidden = false;
     detachCustomer();  // each sale starts with no customer attached
-    loadProducts();  // refresh grid stock counts after the sale
+    loadProducts();    // refresh grid stock counts after the sale
+    // Skip the "Sale complete" prompt — show the receipt directly in the drawer.
+    window.openReceipt(sale.id);
   }
-
-  document.getElementById("btn-new-sale").addEventListener("click", () => {
-    doneModal.hidden = true;
-    scanInput.focus();
-  });
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) =>

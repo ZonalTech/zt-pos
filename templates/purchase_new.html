@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}New purchase order{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>New purchase order</h1>
+  <a class="btn btn-ghost" href="{{ url_for('purchases') }}">← Back</a>
+</div>
+
+{% if only_low %}
+<p class="muted">Showing items at or below their reorder level. Set quantities and place the order.</p>
+{% else %}
+<p class="muted">
+  Enter the quantity to order for each product.
+  <a class="link" href="{{ url_for('purchase_new', low=1) }}">Show only low stock</a>
+</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('purchase_save') }}">
+  <div class="form-grid">
+    <div>
+      <label>Supplier</label>
+      <select name="supplier_id">
+        <option value="">— Select supplier —</option>
+        {% for s in suppliers %}
+        <option value="{{ s.id }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+      {% if not suppliers %}
+      <small class="muted">No suppliers yet — <a class="link" href="{{ url_for('suppliers') }}">add one</a>.</small>
+      {% endif %}
+    </div>
+    <div>
+      <label>Note</label>
+      <input type="text" name="note" placeholder="e.g. weekly restock">
+    </div>
+  </div>
+
+  <table class="table po-table" style="margin-top:16px; table-layout:fixed; width:100%">
+    <colgroup>
+      <col><col style="width:90px"><col style="width:140px"><col style="width:120px"><col style="width:150px">
+    </colgroup>
+    <thead>
+      <tr><th>Product</th><th>On hand</th><th>Unit cost</th><th>Order qty</th><th>Line total</th></tr>
+    </thead>
+    <tbody>
+      {% for p in products %}
+      {% set suggested = p.reorder_level if p.low_stock else 0 %}
+      <tr>
+        <td>{{ p.name }} <span class="muted small">/ {{ p.uom }}</span>
+          {% if p.low_stock %}<span class="badge badge-warn">low</span>{% endif %}
+        </td>
+        <td class="{{ 'text-danger' if p.low_stock }}">{{ p.quantity | qty }}</td>
+        <td><input type="number" name="cost_{{ p.id }}" class="po-cost" data-id="{{ p.id }}"
+                   step="0.01" min="0" value="{{ '%.2f'|format(p.cost_price) }}" style="width:110px"></td>
+        <td><input type="number" name="qty_{{ p.id }}" class="po-qty" data-id="{{ p.id }}"
+                   step="1" min="0" value="{{ suggested }}" style="width:90px"></td>
+        <td class="po-line" id="line-{{ p.id }}">{{ CURRENCY }} 0.00</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">{{ 'Nothing is low on stock.' if only_low else 'No active products.' }}</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="r-grand">
+        <td colspan="4" style="text-align:right">Total</td>
+        <td id="po-total">{{ CURRENCY }} 0.00</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="modal-actions">
+    <a class="btn btn-ghost" href="{{ url_for('purchases') }}">Cancel</a>
+    <button class="btn btn-primary" type="submit">Create order</button>
+  </div>
+</form>
+
+<script>
+  const CUR = "{{ CURRENCY }}";
+  function money(n) { return CUR + " " + (n || 0).toFixed(2); }
+  function recalc() {
+    let total = 0;
+    document.querySelectorAll(".po-qty").forEach((q) => {
+      const id = q.dataset.id;
+      const cost = parseFloat(document.querySelector(`.po-cost[data-id="${id}"]`).value) || 0;
+      const qty = parseInt(q.value) || 0;
+      const line = cost * qty;
+      total += line;
+      document.getElementById("line-" + id).textContent = money(line);
+    });
+    document.getElementById("po-total").textContent = money(total);
+  }
+  document.querySelectorAll(".po-qty, .po-cost").forEach((el) =>
+    el.addEventListener("input", recalc));
+  recalc();
+</script>
+{% endblock %}

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Settings</h1>
+</div>
+<p class="muted page-sub">Your license details and the device this copy is activated on.</p>
+
+{% set p = license.payload or {} %}
+
+<div class="settings-stack">
+
+  <!-- ========================= Store details ========================= -->
+  <section class="settings-card">
+    <header class="sc-head">
+      <div class="sc-title">
+        <h2>Store details</h2>
+        <p class="muted small">Shown on customer receipts.</p>
+      </div>
+    </header>
+    <form method="post" action="{{ url_for('update_store_settings') }}">
+      <div class="field">
+        <label for="kra_pin">KRA PIN</label>
+        <input id="kra_pin" type="text" name="kra_pin" value="{{ KRA_PIN }}"
+               placeholder="e.g. P051234567X" autocomplete="off">
+        <p class="field-hint">Printed on every receipt for tax compliance.</p>
+      </div>
+      <div class="sc-actions">
+        <button class="btn btn-primary" type="submit">Save changes</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ============================ License ============================ -->
+  <section class="settings-card">
+    <header class="sc-head">
+      <div class="sc-title">
+        <h2>License</h2>
+        <p class="muted small">Activation status for this installation.</p>
+      </div>
+      {% if license.licensed %}
+        <span class="status-pill status-pill--ok"><span class="status-dot"></span>Active</span>
+      {% else %}
+        <span class="status-pill status-pill--off"><span class="status-dot"></span>{{ license.reason or 'Inactive' }}</span>
+      {% endif %}
+    </header>
+
+    <dl class="info-grid">
+      <div class="info-item">
+        <dt>Customer</dt>
+        <dd>{{ p.customer or '—' }}</dd>
+      </div>
+      <div class="info-item">
+        <dt>Edition</dt>
+        <dd class="capitalize">{{ p.edition or '—' }}</dd>
+      </div>
+
+      <div class="info-item">
+        <dt>License period</dt>
+        <dd>
+          {{ p.issued or '—' }}
+          <span class="arrow">→</span>
+          {% if p.expires %}{{ p.expires }}{% else %}<span class="muted">Perpetual</span>{% endif %}
+        </dd>
+      </div>
+      <div class="info-item">
+        <dt>Time remaining</dt>
+        <dd>
+          {% if license.days_left is none %}
+            <span class="muted">Never expires</span>
+          {% elif license.days_left < 0 %}
+            <span class="status-pill status-pill--off">Expired</span>
+          {% elif license.days_left == 0 %}
+            Expires today
+          {% else %}
+            {{ license.days_left }} day{{ '' if license.days_left == 1 else 's' }}
+          {% endif %}
+        </dd>
+      </div>
+
+      <div class="info-item">
+        <dt>Device ID</dt>
+        <dd><code>{{ license.machine_id }}</code></dd>
+      </div>
+      <div class="info-item">
+        <dt>App version</dt>
+        <dd>v{{ APP_VERSION }}</dd>
+      </div>
+    </dl>
+
+    {% if license.days_left is not none and 0 <= license.days_left <= 14 %}
+    <div class="notice notice--warn">
+      This license expires soon. Send your <strong>Device ID</strong> above to your
+      supplier to renew, then paste the new key below.
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- ===================== Update / change license ===================== -->
+  <section class="settings-card">
+    <header class="sc-head">
+      <div class="sc-title">
+        <h2>Update or change license</h2>
+        <p class="muted small">
+          Paste a renewed or replacement key for this Device ID to update without re-installing.
+        </p>
+      </div>
+    </header>
+    <form method="post" action="{{ url_for('update_license') }}">
+      <div class="field">
+        <textarea name="license" rows="6" class="license-box" spellcheck="false"
+          placeholder="-----BEGIN ZT-POS LICENSE-----&#10;…&#10;-----END ZT-POS LICENSE-----">{{ pasted or '' }}</textarea>
+      </div>
+      <div class="sc-actions">
+        <button type="submit" class="btn btn-primary">Apply license</button>
+      </div>
+    </form>
+  </section>
+
+</div>
+{% endblock %}

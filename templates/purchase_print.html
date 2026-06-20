@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ po.po_number }}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e5e7eb; color: #111827;
+           font-family: "Segoe UI", Arial, sans-serif; font-size: 14px; }
+    .sheet { background: #fff; width: 800px; max-width: 100%; margin: 24px auto; padding: 40px 44px;
+             box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+    .po-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+    .po-logo { width: 56px; height: 56px; border-radius: 12px; }
+    .store h1 { margin: 0 0 2px; font-size: 22px; }
+    .store .muted, .muted { color: #6b7280; }
+    .po-title { text-align: right; }
+    .po-title h2 { margin: 0; font-size: 24px; letter-spacing: .04em; color: #1f2937; }
+    .po-meta { margin-top: 4px; font-size: 13px; color: #374151; }
+    hr { border: none; border-top: 2px solid #111827; margin: 20px 0; }
+    .parties { display: flex; gap: 40px; margin-bottom: 20px; }
+    .parties h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 13.5px; }
+    thead th { background: #f3f4f6; text-transform: uppercase; font-size: 11px; letter-spacing: .05em; color: #374151; }
+    td.num, th.num { text-align: right; }
+    tfoot td { font-weight: 700; font-size: 15px; border-top: 2px solid #111827; border-bottom: none; }
+    .note { margin-top: 24px; color: #374151; }
+    .sign { margin-top: 48px; display: flex; justify-content: space-between; gap: 40px; }
+    .sign div { flex: 1; border-top: 1px solid #9ca3af; padding-top: 6px; color: #6b7280; font-size: 12px; }
+    .actions { width: 800px; max-width: 100%; margin: 0 auto 24px; display: flex; gap: 10px; }
+    .btn { border: 1px solid #d1d5db; background: #fff; border-radius: 8px; padding: 9px 16px;
+           font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; color: #111827; }
+    .btn.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+    @media print {
+      body { background: #fff; }
+      .sheet { box-shadow: none; margin: 0; width: auto; padding: 0; }
+      .actions, .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="actions no-print">
+    <button class="btn primary" onclick="window.print()">Print</button>
+    <a class="btn" href="{{ url_for('purchase_detail', po_id=po.id) }}">Back</a>
+  </div>
+
+  <div class="sheet">
+    <div class="po-head">
+      <div class="store">
+        <h1>{{ STORE_NAME }}</h1>
+        {% if KRA_PIN %}<div class="muted">PIN: {{ KRA_PIN }}</div>{% endif %}
+      </div>
+      <div class="po-title">
+        <h2>PURCHASE ORDER</h2>
+        <div class="po-meta">
+          <div><strong>{{ po.po_number }}</strong></div>
+          <div>Date: {{ po.created_at.strftime('%Y-%m-%d') }}</div>
+          <div>Status: {{ po.status | capitalize }}</div>
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <div class="parties">
+      <div>
+        <h3>Supplier</h3>
+        {% if po.supplier %}
+          <div><strong>{{ po.supplier.name }}</strong></div>
+          {% if po.supplier.phone %}<div class="muted">{{ po.supplier.phone }}</div>{% endif %}
+          {% if po.supplier.email %}<div class="muted">{{ po.supplier.email }}</div>{% endif %}
+        {% else %}
+          <div class="muted">—</div>
+        {% endif %}
+      </div>
+      <div>
+        <h3>Ordered by</h3>
+        <div>{{ po.user.name if po.user else '—' }}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:36px">#</th><th>Product</th>
+          <th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Line total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in po.items %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ it.name }}</td>
+          <td class="num">{{ it.quantity | qty }}</td>
+          <td class="num">{{ CURRENCY }} {{ '%.2f'|format(it.unit_cost) }}</td>
+          <td class="num">{{ CURRENCY }} {{ '%.2f'|format(it.line_total) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><td colspan="4" class="num">Total</td>
+            <td class="num">{{ CURRENCY }} {{ '%.2f'|format(po.total) }}</td></tr>
+      </tfoot>
+    </table>
+
+    {% if po.note %}<p class="note"><strong>Note:</strong> {{ po.note }}</p>{% endif %}
+
+    <div class="sign">
+      <div>Authorised by</div>
+      <div>Received by</div>
+    </div>
+  </div>
+</body>
+</html>

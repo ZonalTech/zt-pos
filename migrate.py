@@ -23,6 +23,7 @@ from config import Config
 from app import app
 from models import db
 from init_db import ensure_default_admin, DEFAULT_ADMIN
+from models import ensure_default_uoms, ensure_default_shift_types
 
 
 # MariaDB supports "ADD COLUMN IF NOT EXISTS", so these are idempotent.
@@ -79,11 +80,61 @@ def upgrade_products_table():
     with engine.connect() as conn:
         conn.execute(text(
             "ALTER TABLE products "
-            "ADD COLUMN IF NOT EXISTS image VARCHAR(255) NULL"
+            "ADD COLUMN IF NOT EXISTS image VARCHAR(255) NULL, "
+            "ADD COLUMN IF NOT EXISTS uom VARCHAR(16) NOT NULL DEFAULT 'pc', "
+            "ADD COLUMN IF NOT EXISTS category VARCHAR(80) NOT NULL DEFAULT ''"
         ))
         conn.commit()
     engine.dispose()
-    print("✓ products table has image column.")
+    print("✓ products table has image / uom / category columns.")
+
+
+def upgrade_shift_times():
+    """Give shift schedules start/end times; backfill the seeded defaults."""
+    engine = sqlalchemy.create_engine(Config.SQLALCHEMY_DATABASE_URI)
+    with engine.connect() as conn:
+        conn.execute(text(
+            "ALTER TABLE shift_types "
+            "ADD COLUMN IF NOT EXISTS start_time VARCHAR(5) NOT NULL DEFAULT '', "
+            "ADD COLUMN IF NOT EXISTS end_time VARCHAR(5) NOT NULL DEFAULT ''"
+        ))
+        backfill = {
+            "Morning Shift (08:00–16:00)": ("08:00", "16:00"),
+            "Afternoon Shift (16:00–00:00)": ("16:00", "00:00"),
+            "Night Shift (00:00–08:00)": ("00:00", "08:00"),
+        }
+        for nm, (s, e) in backfill.items():
+            conn.execute(
+                text("UPDATE shift_types SET start_time=:s, end_time=:e "
+                     "WHERE name=:n AND start_time=''"),
+                {"s": s, "e": e, "n": nm},
+            )
+        conn.commit()
+    engine.dispose()
+    print("✓ shift schedules have start/end times.")
+
+
+def upgrade_fractional_quantities():
+    """Allow fractional quantities (kg, litre, …) on stock + sale/PO lines."""
+    engine = sqlalchemy.create_engine(Config.SQLALCHEMY_DATABASE_URI)
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE products MODIFY quantity DECIMAL(12,3) NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE sale_items MODIFY quantity DECIMAL(12,3) NOT NULL DEFAULT 1"))
+        conn.execute(text("ALTER TABLE stock_movements MODIFY change_qty DECIMAL(12,3) NOT NULL"))
+        # purchase_order_items may not exist on very old installs; guard it.
+        try:
+            conn.execute(text("ALTER TABLE purchase_order_items MODIFY quantity DECIMAL(12,3) NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        conn.execute(text(
+            "ALTER TABLE uoms ADD COLUMN IF NOT EXISTS allow_fraction BOOLEAN NOT NULL DEFAULT 0"
+        ))
+        conn.execute(text(
+            "UPDATE uoms SET allow_fraction = 1 WHERE name IN ('kg','g','l','ml')"
+        ))
+        conn.commit()
+    engine.dispose()
+    print("✓ quantity columns accept fractions; kg/g/l/ml marked fractional.")
 
 
 def create_new_tables():
@@ -103,6 +154,13 @@ if __name__ == "__main__":
         upgrade_sales_table()
         upgrade_users_table()
         upgrade_products_table()
+        upgrade_fractional_quantities()
+        upgrade_shift_times()
+        with app.app_context():
+            if ensure_default_uoms():
+                print("✓ seeded default units of measure.")
+            if ensure_default_shift_types():
+                print("✓ seeded default shift schedules.")
         if ensure_default_admin():
             print(f"✓ Created default admin '{DEFAULT_ADMIN['username']}' "
                   f"(password '{DEFAULT_ADMIN['password']}'). Change it after first login!")

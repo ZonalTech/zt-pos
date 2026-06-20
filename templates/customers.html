@@ -35,7 +35,7 @@
         <button class="link" type="button"
           onclick='editCustomer({{ c.to_dict() | tojson }})'>Edit</button>
         <form method="post" action="{{ url_for('customer_deactivate', cid=c.id) }}"
-              onsubmit="return confirm('{{ 'Reactivate' if not c.is_active else 'Deactivate' }} this customer?')">
+              data-confirm="{{ 'Reactivate' if not c.is_active else 'Deactivate' }} this customer?">
           <button class="link {{ 'link-danger' if c.is_active }}" type="submit">
             {{ 'Reactivate' if not c.is_active else 'Deactivate' }}
           </button>

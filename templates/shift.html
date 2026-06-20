@@ -15,6 +15,7 @@
 
       <table class="table compact">
         <tbody>
+          <tr><td>Worked so far</td><td class="r-amt">{{ open_shift.worked }}</td></tr>
           <tr><td>Sales</td><td class="r-amt">{{ summary.count }}</td></tr>
           <tr><td>Takings</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(summary.total) }}</td></tr>
           <tr><td>Cash sales</td><td class="r-amt">{{ CURRENCY }} {{ '%.2f'|format(summary.cash_sales) }}</td></tr>
@@ -24,7 +25,7 @@
       </table>
 
       <form method="post" action="{{ url_for('shift_close') }}"
-            onsubmit="return confirm('Close this shift?')">
+            data-confirm="Close this shift?">
         <label>Counted cash at close (optional)</label>
         <input type="number" name="closing_cash" step="0.01" min="0" placeholder="Count the drawer…">
         <button class="btn btn-primary" type="submit">Close shift</button>

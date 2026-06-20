@@ -25,7 +25,7 @@
         <button class="link" type="button"
           onclick='editUser({{ u.to_dict() | tojson }})'>Edit</button>
         <form method="post" action="{{ url_for('user_deactivate', uid=u.id) }}"
-              onsubmit="return confirm('{{ 'Reactivate' if not u.is_active else 'Deactivate' }} {{ u.name }}?')">
+              data-confirm="{{ 'Reactivate' if not u.is_active else 'Deactivate' }} {{ u.name }}?">
           <button class="link {{ 'link-danger' if u.is_active }}" type="submit">
             {{ 'Reactivate' if not u.is_active else 'Deactivate' }}
           </button>

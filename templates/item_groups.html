@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Item groups{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Item groups</h1>
+  <button class="btn btn-primary" type="button" onclick="openGroupForm()">+ Add group</button>
+</div>
+<p class="muted">Categories you can assign to products on the <a class="link" href="{{ url_for('products') }}">Products</a> page.</p>
+
+<table class="table">
+  <thead>
+    <tr><th>Group</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for g in groups %}
+    <tr class="{{ 'row-inactive' if not g.is_active }}">
+      <td>{{ g.name }}</td>
+      <td>
+        {% if g.is_active %}<span class="badge badge-receive">active</span>
+        {% else %}<span class="badge">inactive</span>{% endif %}
+      </td>
+      <td class="actions">
+        <button class="link" type="button" onclick='editGroup({{ g.to_dict() | tojson }})'>Edit</button>
+        <form method="post" action="{{ url_for('item_group_delete', gid=g.id) }}"
+              data-confirm="Delete the group '{{ g.name }}'? Products in it will be uncategorised.">
+          <button class="link link-danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="muted">No groups yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal" id="group-modal" hidden>
+  <div class="modal-box">
+    <h2 id="group-modal-title">Add group</h2>
+    <form method="post" action="{{ url_for('item_group_save') }}">
+      <input type="hidden" name="id" id="g-id">
+      <label>Group name *</label>
+      <input type="text" name="name" id="g-name" maxlength="80" placeholder="e.g. Drinks" required>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" onclick="document.getElementById('group-modal').hidden=true">Cancel</button>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  function openGroupForm() {
+    document.getElementById('group-modal-title').textContent = 'Add group';
+    document.getElementById('g-id').value = '';
+    document.getElementById('g-name').value = '';
+    document.getElementById('group-modal').hidden = false;
+    document.getElementById('g-name').focus();
+  }
+  function editGroup(g) {
+    document.getElementById('group-modal-title').textContent = 'Edit group';
+    document.getElementById('g-id').value = g.id;
+    document.getElementById('g-name').value = g.name;
+    document.getElementById('group-modal').hidden = false;
+    document.getElementById('g-name').focus();
+  }
+</script>
+{% endblock %}

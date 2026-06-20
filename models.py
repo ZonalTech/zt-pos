@@ -15,6 +15,15 @@ from werkzeug.security import generate_password_hash, check_password_hash
 db = SQLAlchemy()
 
 
+def fmt_qty(value):
+    """Render a quantity without noisy trailing zeros: 5.000→'5', 1.500→'1.5'."""
+    d = Decimal(value or 0)
+    s = format(d, "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s or "0"
+
+
 # Work-schedule shifts an admin can assign to a user. The chosen label is
 # stored verbatim on ``User.assigned_shift`` and copied onto the till session's
 # ``note`` when the cashier opens their shift, so receipts/Z-reports keep it.
@@ -84,7 +93,20 @@ class Shift(db.Model):
 
     def summary(self):
         """Z-report figures for this shift."""
-        sales = list(self.sales)
+        sales = list(self.sales)  # noqa: F841 (kept below)
+        return self._summary(sales)
+
+    @property
+    def worked(self):
+        """Time worked this session ("4h 12m"): open→close, or open→now if open."""
+        if not self.opened_at:
+            return ""
+        end = self.closed_at or datetime.now()
+        mins = max(0, int((end - self.opened_at).total_seconds() // 60))
+        h, m = divmod(mins, 60)
+        return f"{h}h {m}m" if h else f"{m}m"
+
+    def _summary(self, sales):
         by_method = {}
         total = Decimal("0")
         for s in sales:
@@ -126,7 +148,9 @@ class Product(db.Model):
     description = db.Column(db.String(512))
     price = db.Column(db.Numeric(12, 2), nullable=False, default=0)        # selling price
     cost_price = db.Column(db.Numeric(12, 2), nullable=False, default=0)   # buying price
-    quantity = db.Column(db.Integer, nullable=False, default=0)            # stock on hand
+    category = db.Column(db.String(80), nullable=False, default="")        # item group/category
+    uom = db.Column(db.String(16), nullable=False, default="pc")           # unit of measure
+    quantity = db.Column(db.Numeric(12, 3), nullable=False, default=0)     # stock on hand (fractional ok)
     reorder_level = db.Column(db.Integer, nullable=False, default=5)
     image = db.Column(db.String(255))                                      # uploaded photo filename
     is_active = db.Column(db.Boolean, default=True)
@@ -137,6 +161,10 @@ class Product(db.Model):
     def low_stock(self):
         return self.quantity <= self.reorder_level
 
+    @property
+    def qty_display(self):
+        return fmt_qty(self.quantity)
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -145,7 +173,9 @@ class Product(db.Model):
             "description": self.description,
             "price": float(self.price),
             "cost_price": float(self.cost_price),
-            "quantity": self.quantity,
+            "category": self.category or "",
+            "uom": self.uom or "pc",
+            "quantity": float(self.quantity),
             "reorder_level": self.reorder_level,
             "low_stock": self.low_stock,
             "image": self.image or None,
@@ -253,7 +283,7 @@ class SaleItem(db.Model):
     barcode = db.Column(db.String(64))
     name = db.Column(db.String(255), nullable=False)
     unit_price = db.Column(db.Numeric(12, 2), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False, default=1)
+    quantity = db.Column(db.Numeric(12, 3), nullable=False, default=1)
     line_total = db.Column(db.Numeric(12, 2), nullable=False)
 
     def to_dict(self):
@@ -261,7 +291,7 @@ class SaleItem(db.Model):
             "name": self.name,
             "barcode": self.barcode,
             "unit_price": float(self.unit_price),
-            "quantity": self.quantity,
+            "quantity": float(self.quantity),
             "line_total": float(self.line_total),
         }
 
@@ -272,7 +302,7 @@ class StockMovement(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
-    change_qty = db.Column(db.Integer, nullable=False)   # +received, -sold/adjusted down
+    change_qty = db.Column(db.Numeric(12, 3), nullable=False)   # +received, -sold/adjusted down
     movement_type = db.Column(db.String(20), nullable=False)  # receive, sale, adjust
     reference = db.Column(db.String(64))                  # e.g. sale_number
     note = db.Column(db.String(255))
@@ -363,3 +393,190 @@ class MpesaTransaction(db.Model):
             "result_desc": self.result_desc,
             "mpesa_receipt": self.mpesa_receipt,
         }
+
+
+class Uom(db.Model):
+    """A unit of measure (e.g. pc, kg, litre) products can be sold/stocked in.
+
+    Products reference a unit by its short ``name`` (stored on Product.uom), so
+    the list here is the source of truth for the dropdown on the product form.
+    """
+    __tablename__ = "uoms"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(16), unique=True, nullable=False)   # short code shown on receipts, e.g. "kg"
+    description = db.Column(db.String(80), default="")             # human label, e.g. "Kilogram"
+    # Weight/volume units (kg, litre…) can be sold in fractions; pieces can't.
+    allow_fraction = db.Column(db.Boolean, nullable=False, default=False)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "name": self.name,
+            "description": self.description or "",
+            "allow_fraction": self.allow_fraction, "is_active": self.is_active,
+        }
+
+
+# Seeded the first time the UOM list is empty so the product form is never blank.
+# (name, description, allow_fraction)
+DEFAULT_UOMS = [
+    ("pc", "Piece", False), ("kg", "Kilogram", True), ("g", "Gram", True),
+    ("l", "Litre", True), ("ml", "Millilitre", True), ("pack", "Pack", False),
+    ("box", "Box", False), ("dozen", "Dozen", False),
+]
+
+
+def ensure_default_uoms():
+    """Insert the default units if none exist yet. Returns True if it seeded."""
+    if Uom.query.first():
+        return False
+    for name, desc, frac in DEFAULT_UOMS:
+        db.session.add(Uom(name=name, description=desc, allow_fraction=frac))
+    db.session.commit()
+    return True
+
+
+def fractional_uom_names():
+    """Set of active UOM names that allow fractional quantities (kg, l, …)."""
+    return {u.name for u in Uom.query.filter_by(is_active=True, allow_fraction=True).all()}
+
+
+class ItemGroup(db.Model):
+    """A product category/group (e.g. Drinks, Bakery). Assigned to products."""
+    __tablename__ = "item_groups"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "is_active": self.is_active}
+
+
+def active_item_group_names():
+    return [g.name for g in ItemGroup.query.filter_by(is_active=True).order_by(ItemGroup.name).all()]
+
+
+class Supplier(db.Model):
+    """A vendor we buy stock from (used on purchase orders)."""
+    __tablename__ = "suppliers"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False)
+    phone = db.Column(db.String(40), default="")
+    email = db.Column(db.String(160), default="")
+    note = db.Column(db.String(255), default="")
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "name": self.name, "phone": self.phone or "",
+            "email": self.email or "", "note": self.note or "",
+            "is_active": self.is_active,
+        }
+
+
+class PurchaseOrder(db.Model):
+    """An order placed with a supplier to restock products.
+
+    When `status` becomes ``received`` the ordered quantities are added to stock
+    (with a StockMovement per line), so purchasing and inventory stay in sync.
+    """
+    __tablename__ = "purchase_orders"
+
+    id = db.Column(db.Integer, primary_key=True)
+    po_number = db.Column(db.String(32), unique=True, nullable=False, index=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id"), index=True)
+    status = db.Column(db.String(20), nullable=False, default="ordered")  # ordered|received|cancelled
+    total = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    note = db.Column(db.String(255), default="")
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+    received_at = db.Column(db.DateTime)
+
+    supplier = db.relationship("Supplier")
+    user = db.relationship("User")
+    items = db.relationship(
+        "PurchaseOrderItem", backref="po", cascade="all, delete-orphan", lazy="joined"
+    )
+
+
+class PurchaseOrderItem(db.Model):
+    __tablename__ = "purchase_order_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    po_id = db.Column(db.Integer, db.ForeignKey("purchase_orders.id"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"))
+    name = db.Column(db.String(255))                      # snapshot of the product name
+    quantity = db.Column(db.Numeric(12, 3), nullable=False, default=0)
+    unit_cost = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    line_total = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+
+    product = db.relationship("Product")
+
+
+def shift_duration(start, end):
+    """Human duration between two "HH:MM" times, wrapping past midnight."""
+    try:
+        sh, sm = (int(x) for x in (start or "").split(":"))
+        eh, em = (int(x) for x in (end or "").split(":"))
+    except (ValueError, AttributeError):
+        return ""
+    mins = (eh * 60 + em) - (sh * 60 + sm)
+    if mins <= 0:
+        mins += 24 * 60          # overnight shift (e.g. 16:00→00:00)
+    h, m = divmod(mins, 60)
+    if h and m:
+        return f"{h}h {m}m"
+    return f"{h}h" if h else f"{m}m"
+
+
+class ShiftType(db.Model):
+    """A work-shift schedule (e.g. "Morning Shift") with start/end times that an
+    admin can assign to a user. Managed from the Shifts page."""
+    __tablename__ = "shift_types"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    start_time = db.Column(db.String(5), default="")   # "HH:MM"
+    end_time = db.Column(db.String(5), default="")     # "HH:MM"
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    @property
+    def duration(self):
+        return shift_duration(self.start_time, self.end_time)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "name": self.name,
+            "start_time": self.start_time or "", "end_time": self.end_time or "",
+            "duration": self.duration, "is_active": self.is_active,
+        }
+
+
+# (name, start_time, end_time) used to seed a fresh install.
+DEFAULT_SHIFTS = [
+    ("Morning Shift (08:00–16:00)", "08:00", "16:00"),
+    ("Afternoon Shift (16:00–00:00)", "16:00", "00:00"),
+    ("Night Shift (00:00–08:00)", "00:00", "08:00"),
+]
+
+
+def ensure_default_shift_types():
+    """Seed the default shift schedules (with start/end times), once."""
+    if ShiftType.query.first():
+        return False
+    for name, start, end in DEFAULT_SHIFTS:
+        db.session.add(ShiftType(name=name, start_time=start, end_time=end))
+    db.session.commit()
+    return True
+
+
+def active_shift_type_names():
+    """Active shift-schedule names, for the user-assignment dropdown."""
+    return [s.name for s in ShiftType.query.filter_by(is_active=True).order_by(ShiftType.name).all()]

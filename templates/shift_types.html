@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Shifts{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Shift schedules</h1>
+  <button class="btn btn-primary" type="button" onclick="openShiftForm()">+ Add shift</button>
+</div>
+<p class="muted">These shifts can be assigned to staff on the <a class="link" href="{{ url_for('users') }}">Users</a> page.</p>
+
+<table class="table">
+  <thead>
+    <tr><th>Shift</th><th>Start</th><th>End</th><th>Duration</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for s in shift_types %}
+    <tr>
+      <td>{{ s.name }}</td>
+      <td>{{ s.start_time or '—' }}</td>
+      <td>{{ s.end_time or '—' }}</td>
+      <td>{{ s.duration or '—' }}</td>
+      <td class="actions">
+        <button class="link" type="button" onclick='editShift({{ s.to_dict() | tojson }})'>Edit</button>
+        <form method="post" action="{{ url_for('shift_type_delete', st_id=s.id) }}"
+              data-confirm="Delete the shift '{{ s.name }}'? Staff on it will be unassigned.">
+          <button class="link link-danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No shifts yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal" id="shift-modal" hidden>
+  <div class="modal-box">
+    <h2 id="shift-modal-title">Add shift</h2>
+    <form method="post" action="{{ url_for('shift_type_save') }}">
+      <input type="hidden" name="id" id="st-id">
+      <label>Shift name *</label>
+      <input type="text" name="name" id="st-name" maxlength="80"
+             placeholder="e.g. Morning Shift" required>
+      <div class="form-grid">
+        <div>
+          <label>Start time</label>
+          <input type="time" name="start_time" id="st-start">
+        </div>
+        <div>
+          <label>End time</label>
+          <input type="time" name="end_time" id="st-end">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" type="button" onclick="document.getElementById('shift-modal').hidden=true">Cancel</button>
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  function openShiftForm() {
+    document.getElementById('shift-modal-title').textContent = 'Add shift';
+    document.getElementById('st-id').value = '';
+    document.getElementById('st-name').value = '';
+    document.getElementById('st-start').value = '';
+    document.getElementById('st-end').value = '';
+    document.getElementById('shift-modal').hidden = false;
+    document.getElementById('st-name').focus();
+  }
+  function editShift(s) {
+    document.getElementById('shift-modal-title').textContent = 'Edit shift';
+    document.getElementById('st-id').value = s.id;
+    document.getElementById('st-name').value = s.name;
+    document.getElementById('st-start').value = s.start_time || '';
+    document.getElementById('st-end').value = s.end_time || '';
+    document.getElementById('shift-modal').hidden = false;
+    document.getElementById('st-name').focus();
+  }
+</script>
+{% endblock %}

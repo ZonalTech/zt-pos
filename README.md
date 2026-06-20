@@ -136,6 +136,30 @@ Release tagged `v<version>` with the zip, manifest, and
 (see [.github/workflows/release.yml](.github/workflows/release.yml)). Installed
 apps offer the new version on their next update check.
 
+### With the zone CLI
+
+When this app lives inside a [zone](https://github.com/ZonalTech/Zone), the
+`zone` CLI wraps the scripts above so you never call the `.bat` files directly.
+Run these from the app folder (`apps/zt-pos`), or from anywhere in the zone with
+`zone --app zt-pos <command>`:
+
+```
+zone build                 :: = build-setup.bat (POS.exe + release zip + manifest)
+zone build setup           :: = build-online-setup.bat (the online installer)
+zone build all             :: both of the above
+
+zone bump                  :: = bump_version.py (patch); also: minor | major | X.Y.Z
+zone update                :: bump version + rebuild app payload + rebuild installer
+zone update minor          :: same, bumping the minor version
+zone update --no-bump      :: rebuild at the current version (no version change)
+zone update --no-setup     :: skip rebuilding the installer
+
+zone release               :: = release-github.bat (publish the GitHub release)
+```
+
+Typical ship flow:  `zone update`  (build everything locally)  →  `zone release`
+(publish it for installed apps to auto-update).
+
 ---
 
 ## Running from source (no compiling)
@@ -152,6 +176,21 @@ python seed.py                  :: optional: ~10 sample products
 python launcher.py              :: opens the POS in its native window
 ```
 (`run.bat` does all of this for you.)
+
+### With the zone CLI
+
+If you use the zone CLI, the same setup is a few commands — run from the zone
+root (the folder containing `apps/`):
+
+```
+zone get https://github.com/ZonalTech/zt-pos.git   :: clone this app into apps/
+zone setup zt-pos --seed                            :: .env + deps + DB + sample data
+zone start zt-pos                                   :: open the native window (live logs)
+zone start zt-pos --reload                          :: + auto-reload on code/template edits
+```
+
+Other handy ones: `zone migrate zt-pos` (schema upgrades), `zone shell` (REPL
+with db + models loaded), `zone routes`, `zone backup`. See `zone help`.
 
 ## Daily use
 

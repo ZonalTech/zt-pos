@@ -57,8 +57,14 @@ class Config:
     # "License Generator" tool. Rotate by generating a new keypair there and
     # replacing this value (or setting LICENSE_PUBLIC_KEY in .env).
     LICENSE_PUBLIC_KEY = os.getenv(
-        "LICENSE_PUBLIC_KEY", "YwG3ZptN6IrboXLWQc1KwAcfQW+ckoiRHzyNVu09dU0="
+        "LICENSE_PUBLIC_KEY", "yE3U6m060bfCNwkb3gziJiyyDL3O4ir6EAAvrR3/ROo="
     )
+
+    # --- Development conveniences ---
+    # When enabled, the app auto-signs-in as the first active admin so a dev
+    # server restart (which opens a fresh window with no session cookie) doesn't
+    # bounce you to the login form. NEVER enable this in production.
+    DEV_AUTO_LOGIN = os.getenv("DEV_AUTO_LOGIN", "0").lower() in ("1", "true", "yes")
 
     # --- Business settings ---
     CURRENCY = os.getenv("CURRENCY", "KES")

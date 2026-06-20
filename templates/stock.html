@@ -9,6 +9,9 @@
     <span class="total-pill {{ 'text-danger' if low_count }}">
       {{ low_count }} low on stock
     </span>
+    {% if low_count %}
+    <a class="btn btn-primary" href="{{ url_for('purchase_new', low=1) }}">Reorder low stock</a>
+    {% endif %}
   </div>
 </div>
 
@@ -41,7 +44,7 @@
         <tr>
           <td>{{ p.name }}</td>
           <td class="mono">{{ p.barcode }}</td>
-          <td class="{{ 'text-danger' if p.low_stock }}">{{ p.quantity }}</td>
+          <td class="{{ 'text-danger' if p.low_stock }}">{{ p.quantity | qty }}</td>
           <td>
             {% if p.low_stock %}
               <span class="badge badge-warn">Low · reorder {{ p.reorder_level }}</span>
@@ -60,6 +63,7 @@
 
 <section class="panel">
   <h2>Recent stock movements</h2>
+  <div id="table-pane">
   <table class="table compact">
     <thead>
       <tr><th>When</th><th>Item</th><th>Type</th><th>Change</th><th>Ref / note</th></tr>
@@ -71,7 +75,7 @@
         <td>{{ m.product.name if m.product else '—' }}</td>
         <td><span class="badge badge-{{ m.movement_type }}">{{ m.movement_type }}</span></td>
         <td class="{{ 'text-success' if m.change_qty > 0 else 'text-danger' }}">
-          {{ '+' if m.change_qty > 0 }}{{ m.change_qty }}
+          {{ '+' if m.change_qty > 0 }}{{ m.change_qty | qty }}
         </td>
         <td>{{ m.reference or m.note or '' }}</td>
       </tr>
@@ -80,9 +84,36 @@
       {% endfor %}
     </tbody>
   </table>
+
+  {% if total_count %}
+  <div class="pager">
+    <div class="pager-info">
+      Showing <strong>{{ (page - 1) * per_page + 1 }}</strong>–<strong>{{ [page * per_page, total_count] | min }}</strong>
+      of <strong>{{ total_count }}</strong>
+      <label class="pager-per">Rows per page
+        <select>
+          {% for n in per_page_options %}
+          <option value="{{ n }}" {{ 'selected' if n == per_page }}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="pager-nav">
+      {% if page > 1 %}
+      <a class="btn" href="{{ url_for('stock', page=page-1, per=per_page) }}">‹ Prev</a>
+      {% else %}<span class="btn disabled">‹ Prev</span>{% endif %}
+      <span class="pager-page">Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}
+      <a class="btn" href="{{ url_for('stock', page=page+1, per=per_page) }}">Next ›</a>
+      {% else %}<span class="btn disabled">Next ›</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+  </div>
 </section>
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/stock.js') }}"></script>
+<script src="{{ url_for('static', filename='js/paginate.js') }}?v=2"></script>
 {% endblock %}

@@ -21,16 +21,13 @@
 </head>
 <body>
   {% if current_user %}
-  {% set settings_endpoints = ['payment_settings', 'currencies', 'customers', 'users', 'shift_page', 'shift_summary'] %}
+  {% set settings_endpoints = ['payment_settings', 'currencies', 'customers', 'suppliers', 'purchases', 'purchase_new', 'purchase_detail', 'uoms', 'item_groups', 'users', 'shift_types', 'shift_page', 'shift_summary', 'settings'] %}
   <aside class="sidebar">
     <div class="sidebar-head">
       <div class="brand">
         <img src="{{ url_for('static', filename='img/logo.png') }}" class="brand-logo" alt="">
         <span class="brand-name">{{ STORE_NAME }}</span>
       </div>
-      <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
-        <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-      </button>
     </div>
     <nav class="nav">
       {% if current_user.is_admin %}
@@ -56,6 +53,10 @@
         <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
         <span class="nav-label">Sales</span>
       </a>
+      <a href="{{ url_for('reports') }}" title="Reports" class="{{ 'active' if request.endpoint == 'reports' }}">
+        <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span class="nav-label">Reports</span>
+      </a>
       {% else %}
       <a href="{{ url_for('shift_page') }}" title="Shift" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">
         <svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -64,14 +65,19 @@
       {% endif %}
     </nav>
     <div class="sidebar-footer">
-      <a class="shift-pill {{ 'open' if current_shift else 'closed' }}" href="{{ url_for('shift_page') }}"
-         title="{{ current_user.assigned_shift or 'No shift assigned' }}">
-        <span class="shift-label">
-        {% if current_shift %}{{ current_shift.note or 'Shift open' }}
-        {% elif current_user.assigned_shift %}{{ current_user.assigned_shift }}
-        {% else %}No shift{% endif %}
-        </span>
-      </a>
+      <div class="shift-row">
+        <a class="shift-pill {{ 'open' if current_shift else 'closed' }}" href="{{ url_for('shift_page') }}"
+           title="{{ current_user.assigned_shift or 'No shift assigned' }}">
+          <span class="shift-label">
+          {% if current_shift %}{{ current_shift.note or 'Shift open' }}
+          {% elif current_user.assigned_shift %}{{ current_user.assigned_shift }}
+          {% else %}No shift{% endif %}
+          </span>
+        </a>
+        <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </div>
       <details class="nav-menu user-menu">
         <summary class="{{ 'active' if current_user.is_admin and request.endpoint in settings_endpoints }}"
                  title="{{ current_user.name }} ({{ current_user.role }})">
@@ -83,11 +89,17 @@
           <a href="{{ url_for('payment_settings') }}" class="{{ 'active' if request.endpoint == 'payment_settings' }}">Payments</a>
           <a href="{{ url_for('currencies') }}" class="{{ 'active' if request.endpoint == 'currencies' }}">Currencies</a>
           <a href="{{ url_for('customers') }}" class="{{ 'active' if request.endpoint == 'customers' }}">Customers</a>
+          <a href="{{ url_for('suppliers') }}" class="{{ 'active' if request.endpoint == 'suppliers' }}">Suppliers</a>
+          <a href="{{ url_for('purchases') }}" class="{{ 'active' if request.endpoint in ['purchases', 'purchase_new', 'purchase_detail'] }}">Purchases</a>
+          <a href="{{ url_for('item_groups') }}" class="{{ 'active' if request.endpoint == 'item_groups' }}">Item groups</a>
+          <a href="{{ url_for('uoms') }}" class="{{ 'active' if request.endpoint == 'uoms' }}">Units (UOM)</a>
           <a href="{{ url_for('users') }}" class="{{ 'active' if request.endpoint == 'users' }}">Users</a>
-          <a href="{{ url_for('shift_page') }}" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">Shift</a>
+          <a href="{{ url_for('shift_types') }}" class="{{ 'active' if request.endpoint == 'shift_types' }}">Shifts</a>
+          <a href="{{ url_for('shift_page') }}" class="{{ 'active' if request.endpoint in ['shift_page', 'shift_summary'] }}">My shift</a>
+          <a href="{{ url_for('settings') }}" class="{{ 'active' if request.endpoint == 'settings' }}">Settings</a>
           <button type="button" class="nav-menu-item" id="update-btn">
             <span class="tt-icon" aria-hidden="true">⬇️</span>
-            <span class="tt-label">Check for updates</span>
+            <span class="tt-label">Update (v{{ APP_VERSION }})</span>
           </button>
           <div class="nav-menu-sep"></div>
           {% endif %}
@@ -102,7 +114,6 @@
               <span class="tt-label">Sign out</span>
             </button>
           </form>
-          <div class="nav-menu-version">v{{ APP_VERSION }}</div>
         </div>
       </details>
     </div>
@@ -139,6 +150,35 @@
       </main>
     </div>
   </div>
+
+  {% if current_user %}
+  <!-- Right-side receipt panel: receipts load here, inside the app. -->
+  <div id="receipt-drawer" class="receipt-drawer" hidden>
+    <div class="receipt-drawer-backdrop" data-receipt-close></div>
+    <aside class="receipt-drawer-panel" role="dialog" aria-label="Receipt" tabindex="-1">
+      <header class="receipt-drawer-head">
+        <span>Receipt</span>
+        <div class="receipt-drawer-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="receipt-print">Print</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-receipt-close aria-label="Close">✕</button>
+        </div>
+      </header>
+      <iframe id="receipt-frame" class="receipt-frame" title="Receipt"></iframe>
+    </aside>
+  </div>
+
+  <!-- In-app confirmation dialog (replaces the browser's confirm() popup). -->
+  <div class="modal" id="confirm-modal" hidden>
+    <div class="modal-box center">
+      <h2 id="confirm-title">Please confirm</h2>
+      <p id="confirm-message" class="muted"></p>
+      <div class="modal-actions center">
+        <button class="btn btn-primary" id="confirm-ok" type="button">OK</button>
+        <button class="btn btn-ghost" id="confirm-cancel" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   {% block scripts %}{% endblock %}
   <script>
@@ -234,6 +274,111 @@
           sync();
         });
       }
+    })();
+
+    // Receipt drawer: load a receipt into the right-side panel (never the browser).
+    (function () {
+      const drawer = document.getElementById("receipt-drawer");
+      if (!drawer) return;
+      const frame = document.getElementById("receipt-frame");
+      const printBtn = document.getElementById("receipt-print");
+      const panel = drawer.querySelector(".receipt-drawer-panel");
+
+      let currentReceiptId = null;
+
+      window.openReceipt = function (id, autoprint) {
+        if (!id) return;
+        currentReceiptId = id;
+        frame.src = `/receipt/${id}?embed=1`;
+        drawer.hidden = false;
+        requestAnimationFrame(() => { drawer.classList.add("open"); panel.focus(); });
+        if (autoprint) printReceipt(id);
+      };
+      function closeReceipt() {
+        drawer.classList.remove("open");
+        setTimeout(() => { drawer.hidden = true; frame.src = "about:blank"; }, 250);
+        // Back to the till, ready for the next sale.
+        const scan = document.getElementById("scan-input");
+        if (scan) scan.focus();
+      }
+      // Print straight to a connected printer (no dialog). The result shows as a
+      // toast (e.g. "No printer connected.").
+      async function printReceipt(id) {
+        if (!id) return;
+        try {
+          const res = await fetch(`/api/receipt/${id}/print`, { method: "POST" });
+          const data = await res.json();
+          const msg = data.message || (data.ok ? "Printing…" : "Couldn't print.");
+          window.showToast && window.showToast(msg, data.ok ? "success" : "error");
+        } catch (_) {
+          window.showToast && window.showToast("Couldn't reach the printer.", "error");
+        }
+      }
+      window.printReceipt = printReceipt;
+
+      // Save an Excel template to the user's Downloads folder (the embedded
+      // window can't show a browser "Save as" dialog).
+      window.saveTemplate = async function (url) {
+        try {
+          const res = await fetch(url, { method: "POST" });
+          const data = await res.json();
+          if (data.ok) window.showToast("Template saved to " + data.path, "success");
+          else window.showToast(data.error || "Couldn't save the template.", "error");
+        } catch (_) {
+          window.showToast("Couldn't save the template.", "error");
+        }
+      };
+      drawer.querySelectorAll("[data-receipt-close]").forEach((el) =>
+        el.addEventListener("click", closeReceipt));
+      document.addEventListener("keydown", (e) => {
+        if (drawer.hidden) return;
+        if (e.key === "Escape") closeReceipt();
+        // While the receipt is open, Enter prints it.
+        else if (e.key === "Enter") { e.preventDefault(); printReceipt(currentReceiptId); }
+      });
+      printBtn.addEventListener("click", () => printReceipt(currentReceiptId));
+
+      // Any element with data-receipt="<id>" opens the drawer instead of navigating.
+      document.addEventListener("click", (e) => {
+        const trigger = e.target.closest("[data-receipt]");
+        if (!trigger) return;
+        e.preventDefault();
+        window.openReceipt(trigger.getAttribute("data-receipt"));
+      });
+    })();
+
+    // In-app confirm dialog: any <form data-confirm="…"> asks here, not via the
+    // browser's native confirm() popup.
+    (function () {
+      const modal = document.getElementById("confirm-modal");
+      if (!modal) return;
+      const msg = document.getElementById("confirm-message");
+      const okBtn = document.getElementById("confirm-ok");
+      const cancelBtn = document.getElementById("confirm-cancel");
+      let pendingForm = null;
+      function close() { modal.hidden = true; pendingForm = null; }
+
+      document.addEventListener("submit", (e) => {
+        const form = e.target.closest("form[data-confirm]");
+        if (!form || form.dataset.confirmed === "1") return;
+        e.preventDefault();
+        pendingForm = form;
+        msg.textContent = form.getAttribute("data-confirm");
+        modal.hidden = false;
+        okBtn.focus();
+      });
+      okBtn.addEventListener("click", () => {
+        const f = pendingForm;
+        close();
+        if (!f) return;
+        f.dataset.confirmed = "1";   // mark so the re-submit isn't intercepted
+        f.submit();
+      });
+      cancelBtn.addEventListener("click", close);
+      modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !modal.hidden) close();
+      });
     })();
   </script>
 

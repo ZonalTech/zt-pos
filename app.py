@@ -13,7 +13,7 @@ from functools import wraps
 
 from flask import (
     Flask, render_template, request, redirect, url_for, jsonify, flash, abort,
-    session, g, send_from_directory
+    session, g, send_from_directory, Response
 )
 from werkzeug.utils import secure_filename
 from sqlalchemy import func, create_engine, text
@@ -22,12 +22,17 @@ from sqlalchemy.exc import OperationalError, InterfaceError
 from config import Config, resource_path, app_dir
 from models import (
     db, Product, Sale, SaleItem, StockMovement, User, Shift, ExchangeRate,
-    Setting, MpesaTransaction, Customer, SHIFT_TYPES,
+    Setting, MpesaTransaction, Customer,
+    Supplier, PurchaseOrder, PurchaseOrderItem, Uom, fractional_uom_names,
+    fmt_qty, ShiftType, active_shift_type_names,
+    ItemGroup, active_item_group_names,
 )
 import rates as fx
 import payments as pay
 import updates
 import license as lic
+import printing
+import spreadsheet
 
 
 def create_app():
@@ -62,6 +67,20 @@ def create_app():
         g.user = None
         g.shift = None
         uid = session.get("user_id")
+        # Dev convenience: skip the login form after a restart by auto-signing
+        # in as an admin. Gated by DEV_AUTO_LOGIN — never on in production.
+        # Suppressed after an explicit sign-out so logout isn't instantly undone.
+        if not uid and Config.DEV_AUTO_LOGIN and not session.get("logged_out"):
+            try:
+                admin = (
+                    User.query.filter_by(role="admin", is_active=True)
+                    .order_by(User.id).first()
+                )
+                if admin:
+                    session["user_id"] = admin.id
+                    uid = admin.id
+            except (OperationalError, InterfaceError):
+                pass
         if uid:
             # Never let a DB outage crash request handling — that would stop the
             # db-error/troubleshoot pages from rendering. Degrade to "logged out".
@@ -81,6 +100,7 @@ def create_app():
     def inject_settings():
         return dict(
             STORE_NAME=app.config["STORE_NAME"],
+            KRA_PIN=pay.get("kra_pin", ""),
             CURRENCY=app.config["CURRENCY"],
             BASE_CURRENCY=app.config["BASE_CURRENCY"],
             CURRENCIES=fx.supported_currencies(),
@@ -92,6 +112,8 @@ def create_app():
             current_shift=g.get("shift"),
             LICENSE=lic.status(),
         )
+
+    app.jinja_env.filters["qty"] = fmt_qty   # tidy quantity formatting in templates
 
     register_routes(app)
     return app
@@ -139,11 +161,74 @@ def _dec(value, default="0"):
         return Decimal(default)
 
 
+def _receipt_qr(sale):
+    """A QR code (SVG data URI) encoding a compact, scannable receipt summary."""
+    import segno
+    lines = [Config.STORE_NAME]
+    pin = pay.get("kra_pin", "")
+    if pin:
+        lines.append("PIN: %s" % pin)
+    lines.append(sale.sale_number)
+    lines.append(sale.created_at.strftime("%Y-%m-%d %H:%M"))
+    lines.append("TOTAL %s %.2f" % (Config.CURRENCY, sale.total))
+    try:
+        return segno.make("\n".join(lines), error="m").svg_data_uri(scale=4, border=0)
+    except Exception:
+        return None
+
+
 def _next_sale_number():
     """SALE-YYYYMMDD-#### sequential per day."""
     today = date.today()
     prefix = f"SALE-{today:%Y%m%d}-"
     count = Sale.query.filter(Sale.sale_number.like(prefix + "%")).count()
+    return f"{prefix}{count + 1:04d}"
+
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _xlsx_response(data, filename):
+    """Send .xlsx bytes as a file download."""
+    return Response(data, mimetype=_XLSX_MIME, headers={
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    })
+
+
+def _save_to_downloads(data, filename):
+    """Write bytes to the user's Downloads folder (the app runs locally, so the
+    embedded window can't show a browser 'Save as' dialog). Returns the path."""
+    candidates = [
+        os.path.join(os.path.expanduser("~"), "Downloads"),
+        os.path.join(os.path.expanduser("~"), "Desktop"),
+        app_dir(),
+    ]
+    for folder in candidates:
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, filename)
+            with open(path, "wb") as f:
+                f.write(data)
+            return path
+        except OSError:
+            continue
+    raise OSError("No writable location for the download.")
+
+
+def _tag_fractional(dicts):
+    """Add a `fractional` flag to each product dict (True if its UOM allows
+    fractional quantities, e.g. kg/litre). Used by the POS to allow decimals."""
+    frac = fractional_uom_names()
+    for d in dicts:
+        d["fractional"] = d.get("uom") in frac
+    return dicts
+
+
+def _next_po_number():
+    """PO-YYYYMMDD-#### sequential per day."""
+    today = date.today()
+    prefix = f"PO-{today:%Y%m%d}-"
+    count = PurchaseOrder.query.filter(PurchaseOrder.po_number.like(prefix + "%")).count()
     return f"{prefix}{count + 1:04d}"
 
 
@@ -224,15 +309,15 @@ def _price_cart(cart):
         product = Product.query.get(line.get("id"))
         if not product or not product.is_active:
             raise PricingError(f"Product not found: {line.get('name')}")
-        qty = int(line.get("quantity", 0))
+        qty = _dec(line.get("quantity", 0))
         if qty <= 0:
             raise PricingError(f"Invalid quantity for {product.name}")
         if qty > product.quantity:
             raise PricingError(
                 f"Not enough stock for {product.name} "
-                f"(have {product.quantity}, need {qty})"
+                f"(have {fmt_qty(product.quantity)}, need {fmt_qty(qty)})"
             )
-        line_total = product.price * qty
+        line_total = (product.price * qty).quantize(Decimal("0.01"))
         subtotal += line_total
         resolved.append((product, qty, line_total))
     tax = (subtotal * tax_rate).quantize(Decimal("0.01"))
@@ -266,6 +351,9 @@ def register_routes(app):
     @app.route("/logout", methods=["POST"])
     def logout():
         session.clear()
+        # Mark an explicit sign-out so DEV_AUTO_LOGIN doesn't re-authenticate
+        # on the very next request and bounce the user past the login form.
+        session["logged_out"] = True
         flash("Signed out.", "success")
         return redirect(url_for("login"))
 
@@ -401,11 +489,67 @@ def register_routes(app):
         )
 
     # ------------------------------- Users -------------------------------
+    # --------------------------- Shift schedules -------------------------
+    @app.route("/shift-types")
+    @admin_required
+    def shift_types():
+        rows = ShiftType.query.order_by(ShiftType.is_active.desc(), ShiftType.name).all()
+        return render_template("shift_types.html", shift_types=rows)
+
+    @app.route("/shift-types/save", methods=["POST"])
+    @admin_required
+    def shift_type_save():
+        sid = request.form.get("id")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            flash("Shift name is required.", "error")
+            return redirect(url_for("shift_types"))
+        # No two shifts may share a name.
+        clash = ShiftType.query.filter(
+            ShiftType.name == name, ShiftType.id != (int(sid) if sid else 0)
+        ).first()
+        if clash:
+            flash(f"A shift named '{name}' already exists.", "error")
+            return redirect(url_for("shift_types"))
+        start_time = (request.form.get("start_time") or "").strip()
+        end_time = (request.form.get("end_time") or "").strip()
+        if sid:
+            st = ShiftType.query.get_or_404(int(sid))
+            old_name = st.name
+            st.name = name
+            st.start_time = start_time
+            st.end_time = end_time
+            # Keep staff assignments in step with the renamed shift.
+            if old_name != name:
+                User.query.filter_by(assigned_shift=old_name).update(
+                    {"assigned_shift": name}, synchronize_session=False
+                )
+            db.session.commit()
+            flash("Shift updated.", "success")
+        else:
+            db.session.add(ShiftType(name=name, start_time=start_time, end_time=end_time))
+            db.session.commit()
+            flash("Shift added.", "success")
+        return redirect(url_for("shift_types"))
+
+    @app.route("/shift-types/delete/<int:st_id>", methods=["POST"])
+    @admin_required
+    def shift_type_delete(st_id):
+        st = ShiftType.query.get_or_404(st_id)
+        # Clear the assignment from anyone currently on this shift.
+        User.query.filter_by(assigned_shift=st.name).update(
+            {"assigned_shift": None}, synchronize_session=False
+        )
+        db.session.delete(st)
+        db.session.commit()
+        flash(f"Shift '{st.name}' deleted.", "success")
+        return redirect(url_for("shift_types"))
+
     @app.route("/users")
     @admin_required
     def users():
         people = User.query.order_by(User.is_active.desc(), User.name).all()
-        return render_template("users.html", users=people, shift_types=SHIFT_TYPES)
+        return render_template("users.html", users=people, shift_types=active_shift_type_names())
 
     @app.route("/users/save", methods=["POST"])
     @admin_required
@@ -418,8 +562,8 @@ def register_routes(app):
         assigned_shift = request.form.get("assigned_shift", "").strip()
         if role not in ("admin", "cashier"):
             role = "cashier"
-        # Only accept a known shift label; blank clears any assignment.
-        if assigned_shift not in SHIFT_TYPES:
+        # Only accept a known (active) shift label; blank clears any assignment.
+        if assigned_shift not in active_shift_type_names():
             assigned_shift = None
         if not username or not name:
             flash("Username and name are required.", "error")
@@ -542,7 +686,7 @@ def register_routes(app):
         product = Product.query.filter_by(barcode=barcode.strip(), is_active=True).first()
         if not product:
             return jsonify({"found": False}), 404
-        return jsonify({"found": True, "product": product.to_dict()})
+        return jsonify({"found": True, "product": _tag_fractional([product.to_dict()])[0]})
 
     @app.route("/api/products/search")
     @login_required
@@ -553,7 +697,7 @@ def register_routes(app):
             like = f"%{q}%"
             query = query.filter(db.or_(Product.name.like(like), Product.barcode.like(like)))
         products = query.order_by(Product.name).limit(25).all()
-        return jsonify([p.to_dict() for p in products])
+        return jsonify(_tag_fractional([p.to_dict() for p in products]))
 
     @app.route("/api/products/grid")
     @login_required
@@ -564,7 +708,7 @@ def register_routes(app):
             .order_by(Product.name)
             .all()
         )
-        return jsonify([p.to_dict() for p in products])
+        return jsonify(_tag_fractional([p.to_dict() for p in products]))
 
     @app.route("/api/checkout", methods=["POST"])
     @login_required
@@ -713,7 +857,21 @@ def register_routes(app):
     @login_required
     def receipt(sale_id):
         sale = Sale.query.get_or_404(sale_id)
-        return render_template("receipt.html", sale=sale)
+        return render_template("receipt.html", sale=sale, qr=_receipt_qr(sale))
+
+    @app.route("/api/receipt/<int:sale_id>/print", methods=["POST"])
+    @login_required
+    def api_print_receipt(sale_id):
+        """Print the receipt straight to a connected printer (no dialog).
+
+        Returns {ok, message}. ok=False with "No printer connected." when there
+        is no real printer, so the UI can tell the cashier.
+        """
+        sale = Sale.query.get_or_404(sale_id)
+        ok, message = printing.print_receipt(
+            sale, Config.STORE_NAME, Config.CURRENCY, pay.get("kra_pin", "")
+        )
+        return jsonify({"ok": ok, "message": message})
 
     # ----------------------------- Customers -----------------------------
     @app.route("/api/customer/lookup")
@@ -727,6 +885,25 @@ def register_routes(app):
         if not customer:
             return jsonify({"found": False, "phone": phone})
         return jsonify({"found": True, "customer": customer.to_dict()})
+
+    @app.route("/api/customer/search")
+    @login_required
+    def api_customer_search():
+        """Search active loyalty customers by phone (or name) for the till picker."""
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify({"results": []})
+        like = f"%{q}%"
+        rows = (
+            Customer.query.filter(
+                Customer.is_active.is_(True),
+                db.or_(Customer.phone.like(like), Customer.name.like(like)),
+            )
+            .order_by(Customer.name)
+            .limit(8)
+            .all()
+        )
+        return jsonify({"results": [c.to_dict() for c in rows]})
 
     @app.route("/api/customer/create", methods=["POST"])
     @login_required
@@ -902,6 +1079,42 @@ def register_routes(app):
         return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
 
     # -------------------------- Payment settings -------------------------
+    @app.route("/settings")
+    @admin_required
+    def settings():
+        return render_template(
+            "settings.html",
+            license=lic.status(),
+        )
+
+    @app.route("/settings/store", methods=["POST"])
+    @admin_required
+    def update_store_settings():
+        """Save store/business details (e.g. KRA PIN) shown on receipts."""
+        pay.set_many({"kra_pin": (request.form.get("kra_pin") or "").strip()})
+        flash("Store details saved.", "success")
+        return redirect(url_for("settings"))
+
+    @app.route("/settings/license", methods=["POST"])
+    @admin_required
+    def update_license():
+        """Replace the installed license with a newly pasted key (e.g. a renewal).
+
+        Works while the app is already licensed, so admins can update or change
+        the license without going through the lock screen.
+        """
+        token = request.form.get("license", "")
+        ok, reason, _payload = lic.verify_token(token)
+        if not ok:
+            flash(reason, "error")
+            return render_template(
+                "settings.html", license=lic.status(), pasted=token
+            ), 400
+        lic.save_license_file(token)
+        lic.status(force=True)   # refresh the cached status now it's updated
+        flash("License updated.", "success")
+        return redirect(url_for("settings"))
+
     @app.route("/payment-settings")
     @admin_required
     def payment_settings():
@@ -1101,7 +1314,9 @@ def register_routes(app):
             like = f"%{q}%"
             query = query.filter(db.or_(Product.name.like(like), Product.barcode.like(like)))
         items = query.order_by(Product.name).all()
-        return render_template("products.html", products=items, q=q)
+        units = Uom.query.filter_by(is_active=True).order_by(Uom.name).all()
+        groups = active_item_group_names()
+        return render_template("products.html", products=items, q=q, uoms=units, groups=groups)
 
     @app.route("/products/save", methods=["POST"])
     @admin_required
@@ -1133,11 +1348,13 @@ def register_routes(app):
         product.description = request.form.get("description", "").strip()
         product.price = _dec(request.form.get("price", 0))
         product.cost_price = _dec(request.form.get("cost_price", 0))
+        product.uom = (request.form.get("uom") or "pc").strip() or "pc"
+        product.category = (request.form.get("category") or "").strip()
         product.reorder_level = int(request.form.get("reorder_level") or 5)
 
         # On create only, allow setting an opening stock quantity.
         if not pid:
-            opening = int(request.form.get("quantity") or 0)
+            opening = _dec(request.form.get("quantity") or 0)
             product.quantity = opening
             db.session.flush()
             if opening:
@@ -1161,6 +1378,80 @@ def register_routes(app):
         flash("Product saved.", "success")
         return redirect(url_for("products"))
 
+    PRODUCT_IMPORT_HEADERS = [
+        "barcode", "name", "description", "price", "cost_price",
+        "category", "uom", "quantity", "reorder_level",
+    ]
+
+    @app.route("/products/template")
+    @app.route("/products/template", methods=["POST"], endpoint="products_template_save")
+    @admin_required
+    def products_template():
+        sample = ["1234567890123", "Sample Item", "Optional description", 100, 60, "Drinks", "pc", 0, 5]
+        data = spreadsheet.build_template(PRODUCT_IMPORT_HEADERS, sample, "Products")
+        if request.method == "POST":
+            path = _save_to_downloads(data, "products-template.xlsx")
+            return jsonify({"ok": True, "path": path})
+        return _xlsx_response(data, "products-template.xlsx")
+
+    @app.route("/products/import", methods=["POST"])
+    @admin_required
+    def products_import():
+        """Bulk create/update products from an uploaded .xlsx/.csv (keyed by barcode)."""
+        f = request.files.get("file")
+        if not f or not f.filename:
+            flash("Choose a file to import.", "error")
+            return redirect(url_for("products"))
+        rows, err = spreadsheet.read_table(f)
+        if err:
+            flash(err, "error")
+            return redirect(url_for("products"))
+
+        created = updated = 0
+        skipped = []
+        for i, row in enumerate(rows, start=2):   # row 1 is the header
+            barcode = str(row.get("barcode") or "").strip()
+            name = str(row.get("name") or "").strip()
+            if not barcode or not name:
+                skipped.append(i)
+                continue
+            product = Product.query.filter_by(barcode=barcode).first()
+            is_new = product is None
+            if is_new:
+                product = Product(barcode=barcode)
+                db.session.add(product)
+            product.name = name
+            product.description = str(row.get("description") or "").strip()
+            product.price = _dec(row.get("price") or 0)
+            product.cost_price = _dec(row.get("cost_price") or 0)
+            product.category = str(row.get("category") or "").strip()
+            product.uom = (str(row.get("uom") or "pc").strip() or "pc")
+            try:
+                product.reorder_level = int(_dec(row.get("reorder_level") or 5))
+            except Exception:
+                product.reorder_level = 5
+            if is_new:
+                # Opening stock only on create — never silently overwrite the
+                # on-hand quantity of an existing product on re-import.
+                opening = _dec(row.get("quantity") or 0)
+                product.quantity = opening
+                db.session.flush()
+                if opening:
+                    db.session.add(StockMovement(
+                        product_id=product.id, change_qty=opening,
+                        movement_type="receive", note="Import opening stock",
+                    ))
+                created += 1
+            else:
+                updated += 1
+        db.session.commit()
+
+        msg = f"Imported {created} new and updated {updated} product(s)."
+        if skipped:
+            msg += f" Skipped {len(skipped)} row(s) missing barcode/name."
+        flash(msg, "success" if not skipped else "info")
+        return redirect(url_for("products"))
+
     @app.route("/products/delete/<int:pid>", methods=["POST"])
     @admin_required
     def product_delete(pid):
@@ -1180,11 +1471,25 @@ def register_routes(app):
     @app.route("/stock")
     @admin_required
     def stock():
-        movements = (
-            StockMovement.query.order_by(StockMovement.created_at.desc()).limit(100).all()
-        )
         products = Product.query.filter_by(is_active=True).order_by(Product.name).all()
-        return render_template("stock.html", movements=movements, products=products)
+
+        # Paginate the movements ledger.
+        per_page_options = (10, 20, 50, 100)
+        per_page = request.args.get("per", default=20, type=int)
+        if per_page not in per_page_options:
+            per_page = 20
+        page = request.args.get("page", default=1, type=int)
+        mv_q = StockMovement.query.order_by(StockMovement.created_at.desc())
+        total_count = mv_q.count()
+        pages = max(1, (total_count + per_page - 1) // per_page)
+        page = max(1, min(page, pages))
+        movements = mv_q.offset((page - 1) * per_page).limit(per_page).all()
+
+        return render_template(
+            "stock.html", movements=movements, products=products,
+            total_count=total_count, page=page, pages=pages,
+            per_page=per_page, per_page_options=per_page_options,
+        )
 
     @app.route("/api/stock/receive", methods=["POST"])
     @admin_required
@@ -1192,7 +1497,7 @@ def register_routes(app):
         """Receive stock by scanning a barcode and entering a quantity."""
         data = request.get_json(silent=True) or {}
         barcode = (data.get("barcode") or "").strip()
-        qty = int(data.get("quantity") or 0)
+        qty = _dec(data.get("quantity") or 0)
         note = (data.get("note") or "").strip()
 
         if qty == 0:
@@ -1208,7 +1513,7 @@ def register_routes(app):
         if qty < 0 and -qty > product.quantity:
             return jsonify({
                 "ok": False,
-                "error": f"Cannot remove {-qty} — only {product.quantity} on hand.",
+                "error": f"Cannot remove {fmt_qty(-qty)} — only {fmt_qty(product.quantity)} on hand.",
             }), 400
 
         product.quantity += qty
@@ -1220,6 +1525,303 @@ def register_routes(app):
         ))
         db.session.commit()
         return jsonify({"ok": True, "product": product.to_dict()})
+
+    # ----------------------------- Item groups ---------------------------
+    @app.route("/item-groups")
+    @admin_required
+    def item_groups():
+        groups = ItemGroup.query.order_by(ItemGroup.is_active.desc(), ItemGroup.name).all()
+        return render_template("item_groups.html", groups=groups)
+
+    @app.route("/item-groups/save", methods=["POST"])
+    @admin_required
+    def item_group_save():
+        gid = request.form.get("id")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            flash("Group name is required.", "error")
+            return redirect(url_for("item_groups"))
+        clash = ItemGroup.query.filter(
+            ItemGroup.name == name, ItemGroup.id != (int(gid) if gid else 0)
+        ).first()
+        if clash:
+            flash(f"A group named '{name}' already exists.", "error")
+            return redirect(url_for("item_groups"))
+        if gid:
+            g_row = ItemGroup.query.get_or_404(int(gid))
+            old = g_row.name
+            g_row.name = name
+            if old != name:   # keep products' category label in step on rename
+                Product.query.filter_by(category=old).update(
+                    {"category": name}, synchronize_session=False
+                )
+            flash("Group updated.", "success")
+        else:
+            db.session.add(ItemGroup(name=name))
+            flash("Group added.", "success")
+        db.session.commit()
+        return redirect(url_for("item_groups"))
+
+    @app.route("/item-groups/delete/<int:gid>", methods=["POST"])
+    @admin_required
+    def item_group_delete(gid):
+        g_row = ItemGroup.query.get_or_404(gid)
+        Product.query.filter_by(category=g_row.name).update(
+            {"category": ""}, synchronize_session=False
+        )
+        db.session.delete(g_row)
+        db.session.commit()
+        flash(f"Group '{g_row.name}' deleted.", "success")
+        return redirect(url_for("item_groups"))
+
+    # ------------------------------- Units (UOM) -------------------------
+    @app.route("/uoms")
+    @admin_required
+    def uoms():
+        units = Uom.query.order_by(Uom.is_active.desc(), Uom.name).all()
+        return render_template("uoms.html", uoms=units)
+
+    @app.route("/uoms/save", methods=["POST"])
+    @admin_required
+    def uom_save():
+        uid = request.form.get("id")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            flash("Unit name is required.", "error")
+            return redirect(url_for("uoms"))
+        # Guard against a duplicate name on a *different* row.
+        clash = Uom.query.filter(Uom.name == name, Uom.id != (int(uid) if uid else 0)).first()
+        if clash:
+            flash(f"A unit named '{name}' already exists.", "error")
+            return redirect(url_for("uoms"))
+        u = Uom.query.get_or_404(int(uid)) if uid else Uom()
+        if not uid:
+            db.session.add(u)
+        u.name = name
+        u.description = (request.form.get("description") or "").strip()
+        u.allow_fraction = bool(request.form.get("allow_fraction"))
+        db.session.commit()
+        flash("Unit saved.", "success")
+        return redirect(url_for("uoms"))
+
+    @app.route("/uoms/deactivate/<int:uid>", methods=["POST"])
+    @admin_required
+    def uom_deactivate(uid):
+        u = Uom.query.get_or_404(uid)
+        u.is_active = not u.is_active
+        db.session.commit()
+        flash(("Reactivated " if u.is_active else "Deactivated ") + u.name + ".", "success")
+        return redirect(url_for("uoms"))
+
+    # ----------------------------- Suppliers -----------------------------
+    @app.route("/suppliers")
+    @admin_required
+    def suppliers():
+        people = Supplier.query.order_by(Supplier.is_active.desc(), Supplier.name).all()
+        return render_template("suppliers.html", suppliers=people)
+
+    @app.route("/suppliers/save", methods=["POST"])
+    @admin_required
+    def supplier_save():
+        sid = request.form.get("id")
+        name = (request.form.get("name") or "").strip()
+        if not name:
+            flash("Supplier name is required.", "error")
+            return redirect(url_for("suppliers"))
+        s = Supplier.query.get_or_404(int(sid)) if sid else Supplier()
+        if not sid:
+            db.session.add(s)
+        s.name = name
+        s.phone = (request.form.get("phone") or "").strip()
+        s.email = (request.form.get("email") or "").strip()
+        s.note = (request.form.get("note") or "").strip()
+        db.session.commit()
+        flash("Supplier saved.", "success")
+        return redirect(url_for("suppliers"))
+
+    @app.route("/suppliers/deactivate/<int:sid>", methods=["POST"])
+    @admin_required
+    def supplier_deactivate(sid):
+        s = Supplier.query.get_or_404(sid)
+        s.is_active = not s.is_active
+        db.session.commit()
+        flash(("Reactivated " if s.is_active else "Deactivated ") + s.name + ".", "success")
+        return redirect(url_for("suppliers"))
+
+    # ----------------------------- Purchases -----------------------------
+    @app.route("/purchases")
+    @admin_required
+    def purchases():
+        orders = (
+            PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).limit(100).all()
+        )
+        low_count = Product.query.filter(
+            Product.is_active.is_(True), Product.quantity <= Product.reorder_level
+        ).count()
+        suppliers_list = Supplier.query.filter_by(is_active=True).order_by(Supplier.name).all()
+        return render_template(
+            "purchases.html", orders=orders, low_count=low_count, suppliers=suppliers_list
+        )
+
+    @app.route("/purchases/new")
+    @admin_required
+    def purchase_new():
+        only_low = request.args.get("low") == "1"
+        products = Product.query.filter_by(is_active=True).order_by(Product.name).all()
+        if only_low:
+            products = [p for p in products if p.low_stock]
+        suppliers_list = Supplier.query.filter_by(is_active=True).order_by(Supplier.name).all()
+        return render_template(
+            "purchase_new.html", products=products, suppliers=suppliers_list, only_low=only_low
+        )
+
+    @app.route("/purchases/save", methods=["POST"])
+    @admin_required
+    def purchase_save():
+        supplier_id = request.form.get("supplier_id") or None
+        po = PurchaseOrder(
+            po_number=_next_po_number(),
+            supplier_id=int(supplier_id) if supplier_id else None,
+            status="ordered", note=(request.form.get("note") or "").strip(),
+            user_id=g.user.id,
+        )
+        total = Decimal("0")
+        for p in Product.query.filter_by(is_active=True).all():
+            qty = _dec(request.form.get(f"qty_{p.id}") or 0)
+            if qty <= 0:
+                continue
+            cost = _dec(request.form.get(f"cost_{p.id}", p.cost_price))
+            line = cost * qty
+            total += line
+            po.items.append(PurchaseOrderItem(
+                product_id=p.id, name=p.name, quantity=qty,
+                unit_cost=cost, line_total=line,
+            ))
+        if not po.items:
+            flash("Enter a quantity for at least one product.", "error")
+            return redirect(url_for("purchase_new"))
+        po.total = total
+        db.session.add(po)
+        db.session.commit()
+        flash(f"Purchase order {po.po_number} created.", "success")
+        return redirect(url_for("purchase_detail", po_id=po.id))
+
+    PO_IMPORT_HEADERS = ["barcode", "quantity", "unit_cost"]
+
+    @app.route("/purchases/template")
+    @app.route("/purchases/template", methods=["POST"], endpoint="purchase_template_save")
+    @admin_required
+    def purchase_template():
+        data = spreadsheet.build_template(
+            PO_IMPORT_HEADERS, ["1234567890123", 10, 60], "Purchase order"
+        )
+        if request.method == "POST":
+            path = _save_to_downloads(data, "purchase-order-template.xlsx")
+            return jsonify({"ok": True, "path": path})
+        return _xlsx_response(data, "purchase-order-template.xlsx")
+
+    @app.route("/purchases/import", methods=["POST"])
+    @admin_required
+    def purchase_import():
+        """Create a purchase order from an uploaded .xlsx/.csv of line items."""
+        f = request.files.get("file")
+        if not f or not f.filename:
+            flash("Choose a file to import.", "error")
+            return redirect(url_for("purchases"))
+        rows, err = spreadsheet.read_table(f)
+        if err:
+            flash(err, "error")
+            return redirect(url_for("purchases"))
+
+        supplier_id = request.form.get("supplier_id") or None
+        po = PurchaseOrder(
+            po_number=_next_po_number(),
+            supplier_id=int(supplier_id) if supplier_id else None,
+            status="ordered", note=(request.form.get("note") or "Imported").strip(),
+            user_id=g.user.id,
+        )
+        total = Decimal("0")
+        skipped = []
+        for i, row in enumerate(rows, start=2):
+            barcode = str(row.get("barcode") or "").strip()
+            if not barcode:
+                continue
+            product = Product.query.filter_by(barcode=barcode).first()
+            if not product:
+                skipped.append(i)
+                continue
+            qty = _dec(row.get("quantity") or 0)
+            if qty <= 0:
+                continue
+            raw_cost = row.get("unit_cost")
+            cost = _dec(raw_cost if raw_cost not in (None, "") else product.cost_price)
+            line = (cost * qty).quantize(Decimal("0.01"))
+            total += line
+            po.items.append(PurchaseOrderItem(
+                product_id=product.id, name=product.name,
+                quantity=qty, unit_cost=cost, line_total=line,
+            ))
+        if not po.items:
+            flash("No valid rows found — check the barcodes and quantities.", "error")
+            return redirect(url_for("purchases"))
+        po.total = total
+        db.session.add(po)
+        db.session.commit()
+        msg = f"Imported PO {po.po_number} with {len(po.items)} item(s)."
+        if skipped:
+            msg += f" Skipped {len(skipped)} row(s) with unknown barcodes."
+        flash(msg, "success")
+        return redirect(url_for("purchase_detail", po_id=po.id))
+
+    @app.route("/purchases/<int:po_id>")
+    @admin_required
+    def purchase_detail(po_id):
+        po = PurchaseOrder.query.get_or_404(po_id)
+        return render_template("purchase_detail.html", po=po)
+
+    @app.route("/purchases/<int:po_id>/print")
+    @admin_required
+    def purchase_print(po_id):
+        po = PurchaseOrder.query.get_or_404(po_id)
+        return render_template("purchase_print.html", po=po)
+
+    @app.route("/purchases/<int:po_id>/receive", methods=["POST"])
+    @admin_required
+    def purchase_receive(po_id):
+        """Mark a PO received: add its quantities to stock + log movements."""
+        po = PurchaseOrder.query.get_or_404(po_id)
+        if po.status != "ordered":
+            flash("Only an open (ordered) PO can be received.", "error")
+            return redirect(url_for("purchase_detail", po_id=po.id))
+        for it in po.items:
+            product = Product.query.get(it.product_id) if it.product_id else None
+            if not product:
+                continue
+            product.quantity += it.quantity
+            if it.unit_cost and it.unit_cost > 0:
+                product.cost_price = it.unit_cost   # remember the latest buying price
+            db.session.add(StockMovement(
+                product_id=product.id, change_qty=it.quantity,
+                movement_type="receive", reference=po.po_number,
+                note=f"PO {po.po_number}",
+            ))
+        po.status = "received"
+        po.received_at = datetime.now()
+        db.session.commit()
+        flash(f"Received {po.po_number} into stock.", "success")
+        return redirect(url_for("purchase_detail", po_id=po.id))
+
+    @app.route("/purchases/<int:po_id>/cancel", methods=["POST"])
+    @admin_required
+    def purchase_cancel(po_id):
+        po = PurchaseOrder.query.get_or_404(po_id)
+        if po.status == "received":
+            flash("Can't cancel a PO that was already received.", "error")
+        else:
+            po.status = "cancelled"
+            db.session.commit()
+            flash(f"{po.po_number} cancelled.", "success")
+        return redirect(url_for("purchase_detail", po_id=po.id))
 
     # ------------------------------- Sales -------------------------------
     @app.route("/sales")
@@ -1247,10 +1849,191 @@ def register_routes(app):
         records = query.order_by(Sale.created_at.desc()).limit(500).all()
         total = sum((s.total for s in records), Decimal("0"))
         people = User.query.order_by(User.name).all()
+
+        # --- Pagination for the table (charts/total stay over the full set) ---
+        per_page_options = (10, 20, 50, 100)
+        per_page = request.args.get("per", default=20, type=int)
+        if per_page not in per_page_options:
+            per_page = 20
+        page = request.args.get("page", default=1, type=int)
+        total_count = query.count()
+        pages = max(1, (total_count + per_page - 1) // per_page)
+        page = max(1, min(page, pages))
+        page_sales = (query.order_by(Sale.created_at.desc())
+                      .offset((page - 1) * per_page).limit(per_page).all())
+        # Filters to preserve across pagination links.
+        filter_args = {}
+        if from_str:
+            filter_args["from"] = from_str
+        if to_str:
+            filter_args["to"] = to_str
+        if user_id:
+            filter_args["user"] = user_id
+        if shift_id:
+            filter_args["shift"] = shift_id
+
+        # Aggregations for the charts (line = daily revenue, donut = by method,
+        # bar = by cashier). Built from the same filtered records as the table.
+        methods = ("cash", "mpesa", "bank")
+        by_date, by_user, by_method = {}, {}, {m: Decimal("0") for m in methods}
+        for s in records:
+            day = s.created_at.strftime("%Y-%m-%d")
+            uname = s.user.name if s.user else (s.cashier or "—")
+            m = s.payment_method if s.payment_method in methods else "cash"
+            by_date[day] = by_date.get(day, Decimal("0")) + s.total
+            by_user[uname] = by_user.get(uname, Decimal("0")) + s.total
+            by_method[m] += s.total
+        date_asc = sorted(by_date.items())
+        user_asc = sorted(by_user.items(), key=lambda kv: kv[1], reverse=True)
+        charts = {
+            "dates": [d for d, _ in date_asc],
+            "date_totals": [float(t) for _, t in date_asc],
+            "users": [name for name, _ in user_asc],
+            "user_totals": [float(t) for _, t in user_asc],
+            "methods": list(methods),
+            "method_totals": [float(by_method[m]) for m in methods],
+        }
+
         return render_template(
-            "sales.html", sales=records, total=total,
+            "sales.html", sales=page_sales, total=total,
             from_str=from_str or "", to_str=to_str or "",
             people=people, user_id=user_id, shift_id=shift_id,
+            charts=charts, total_count=total_count,
+            page=page, pages=pages, per_page=per_page,
+            per_page_options=per_page_options, filter_args=filter_args,
+        )
+
+    # ------------------------------- Reports -----------------------------
+    @app.route("/reports")
+    @admin_required
+    def reports():
+        """Sales report: totals broken down by cashier, by shift, and by date."""
+        from_str = request.args.get("from")
+        to_str = request.args.get("to")
+        user_id = request.args.get("user", type=int)
+
+        # Default to the last 30 days when no range is given.
+        if not from_str and not to_str:
+            from_str = (date.today() - timedelta(days=29)).strftime("%Y-%m-%d")
+            to_str = date.today().strftime("%Y-%m-%d")
+
+        q = Sale.query
+        sh_q = Shift.query
+        try:
+            if from_str:
+                start = datetime.strptime(from_str, "%Y-%m-%d")
+                q = q.filter(Sale.created_at >= start)
+                sh_q = sh_q.filter(Shift.opened_at >= start)
+            if to_str:
+                end = datetime.strptime(to_str, "%Y-%m-%d") + timedelta(days=1)
+                q = q.filter(Sale.created_at < end)
+                sh_q = sh_q.filter(Shift.opened_at < end)
+        except ValueError:
+            flash("Invalid date filter.", "error")
+        if user_id:
+            q = q.filter(Sale.user_id == user_id)
+            sh_q = sh_q.filter(Shift.user_id == user_id)
+
+        sales = q.order_by(Sale.created_at).all()
+        methods = ("cash", "mpesa", "bank")
+
+        def blank():
+            d = {"count": 0, "total": Decimal("0")}
+            d.update({m: Decimal("0") for m in methods})
+            return d
+
+        by_user, by_date = {}, {}
+        grand = blank()
+        for s in sales:
+            uname = s.user.name if s.user else (s.cashier or "—")
+            m = s.payment_method if s.payment_method in methods else "cash"
+            for bucket in (by_user.setdefault(uname, blank()), grand,
+                           by_date.setdefault(s.created_at.strftime("%Y-%m-%d"), blank())):
+                bucket["count"] += 1
+                bucket["total"] += s.total
+                bucket[m] += s.total
+
+        shifts = sh_q.order_by(Shift.opened_at.desc()).all()
+        shift_rows = [{"shift": sh, "summary": sh.summary()} for sh in shifts]
+
+        # Last vs current shift comparison (independent of the date filter):
+        # the two most recent shifts overall.
+        def _shift_metrics(sh):
+            if not sh:
+                return None
+            s = sh.summary()
+            bm = s["by_method"]
+            return {
+                "id": sh.id, "label": sh.note or f"Shift #{sh.id}",
+                "when": sh.opened_at.strftime("%b %d, %H:%M") if sh.opened_at else "",
+                "open": sh.closed_at is None,
+                "total": s["total"], "count": s["count"],
+                "cash": bm.get("cash", Decimal("0")),
+                "mpesa": bm.get("mpesa", Decimal("0")),
+                "bank": bm.get("bank", Decimal("0")),
+            }
+
+        recent = Shift.query.order_by(Shift.opened_at.desc()).limit(2).all()
+        current_m = _shift_metrics(recent[0]) if recent else None
+        last_m = _shift_metrics(recent[1]) if len(recent) > 1 else None
+        cmp_max = max([m["total"] for m in (current_m, last_m) if m] + [Decimal("1")])
+        delta = None
+        if current_m and last_m and last_m["total"]:
+            delta = float((current_m["total"] - last_m["total"]) / last_m["total"] * 100)
+
+        # Waterfall (cascade): bridge last-shift total → current-shift total via
+        # the change in each payment method. Each step is [base, top] + a colour.
+        # Cascade chart: the CURRENT shift's takings built up from 0 by payment
+        # method (Cash + M-Pesa + Bank = Total), with the LAST shift's total as a
+        # reference column. Every value is the real amount — an empty shift reads
+        # 0 across the board (no misleading "delta" drops).
+        waterfall = None
+        if current_m:
+            steps = [{"label": "Last", "range": [0, float(last_m["total"]) if last_m else 0.0],
+                      "color": "#64748b", "value": float(last_m["total"]) if last_m else 0.0}]
+            run = 0.0
+            for key, lbl in (("cash", "Cash"), ("mpesa", "M-Pesa"), ("bank", "Bank")):
+                v = float(current_m[key])
+                end = run + v
+                steps.append({"label": lbl, "range": [run, end],
+                              "color": "#22c55e", "value": v})
+                run = end
+            steps.append({"label": "Current", "range": [0, float(current_m["total"])],
+                          "color": "#2563eb", "value": float(current_m["total"])})
+            waterfall = {
+                "labels": [s["label"] for s in steps],
+                "ranges": [s["range"] for s in steps],
+                "colors": [s["color"] for s in steps],
+                "values": [s["value"] for s in steps],
+            }
+
+        # Arrays for the charts (line = daily revenue ascending; bar = by cashier).
+        date_asc = sorted(by_date.items())
+        user_asc = sorted(by_user.items())
+        charts = {
+            "dates": [d for d, _ in date_asc],
+            "date_totals": [float(r["total"]) for _, r in date_asc],
+            "users": [name for name, _ in user_asc],
+            "user_totals": [float(r["total"]) for _, r in user_asc],
+            "methods": list(methods),
+            "method_totals": [float(grand[m]) for m in methods],
+            "shift_labels": [m["label"] for m in (last_m, current_m) if m],
+            "shift_cash": [float(m["cash"]) for m in (last_m, current_m) if m],
+            "shift_mpesa": [float(m["mpesa"]) for m in (last_m, current_m) if m],
+            "shift_bank": [float(m["bank"]) for m in (last_m, current_m) if m],
+            "waterfall": waterfall,
+        }
+
+        people = User.query.order_by(User.name).all()
+        return render_template(
+            "reports.html",
+            from_str=from_str or "", to_str=to_str or "",
+            people=people, user_id=user_id,
+            by_user=user_asc,
+            by_date=sorted(by_date.items(), reverse=True),
+            shift_rows=shift_rows, grand=grand, methods=methods,
+            current_m=current_m, last_m=last_m, cmp_max=cmp_max, delta=delta,
+            charts=charts,
         )
 
     # --------------------------- DB troubleshooting ----------------------

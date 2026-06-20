@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Reports</h1>
+  <div class="total-pill">Total: {{ CURRENCY }} {{ '%.2f'|format(grand.total) }} <span class="muted">({{ grand.count }} sales)</span></div>
+</div>
+
+<form id="report-filter" class="searchbar" method="get" action="{{ url_for('reports') }}">
+  <label class="inline">From <input type="date" name="from" value="{{ from_str }}"></label>
+  <label class="inline">To <input type="date" name="to" value="{{ to_str }}"></label>
+  <label class="inline">Cashier
+    <select name="user">
+      <option value="">All</option>
+      {% for u in people %}
+      <option value="{{ u.id }}" {{ 'selected' if user_id == u.id }}>{{ u.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="filter-actions">
+    <a class="btn" href="{{ url_for('reports') }}">Reset</a>
+  </div>
+</form>
+<script>
+  // Changing any filter reloads the report — no "Run" button needed.
+  document.querySelectorAll("#report-filter input, #report-filter select")
+    .forEach((el) => el.addEventListener("change", () => el.form.submit()));
+</script>
+
+<!-- ============================== Charts ============================== -->
+<div class="grid-2">
+  <section class="panel report-panel">
+    <h2>Revenue trend</h2>
+    <div class="chart-wrap"><canvas id="chart-revenue"></canvas></div>
+  </section>
+  <section class="panel report-panel">
+    <h2>Sales by cashier</h2>
+    <div class="chart-wrap"><canvas id="chart-cashier"></canvas></div>
+  </section>
+</div>
+
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script id="report-data" type="application/json">{{ charts | tojson }}</script>
+<script>
+  // Defer until the whole page (incl. the #chart-waterfall canvas further down)
+  // is parsed — otherwise getElementById returns null and new Chart() throws.
+  document.addEventListener("DOMContentLoaded", function () {
+    const D = JSON.parse(document.getElementById("report-data").textContent);
+    const css = getComputedStyle(document.documentElement);
+    const muted = (css.getPropertyValue("--muted") || "#94a3b8").trim();
+    const grid = (css.getPropertyValue("--line") || "#e6eaf0").trim();
+    Chart.defaults.color = muted;
+    Chart.defaults.borderColor = grid;
+    Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+    const CUR = "{{ CURRENCY }}";
+    const money = (v) => CUR + " " + Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const moneyTick = (v) => CUR + " " + Number(v).toLocaleString();
+
+    // Line chart — revenue by day
+    new Chart(document.getElementById("chart-revenue"), {
+      type: "line",
+      data: {
+        labels: D.dates,
+        datasets: [{
+          label: "Revenue", data: D.date_totals,
+          borderColor: "#2563eb", backgroundColor: "rgba(37,99,235,.15)",
+          fill: true, tension: .3, pointRadius: 3, borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: (c) => money(c.parsed.y) } } },
+        scales: { y: { beginAtZero: true, ticks: { callback: moneyTick } } },
+      },
+    });
+
+    // Bar chart — total by cashier
+    new Chart(document.getElementById("chart-cashier"), {
+      type: "bar",
+      data: {
+        labels: D.users,
+        datasets: [{
+          label: "Total", data: D.user_totals,
+          backgroundColor: "#3b82f6", borderRadius: 6, maxBarThickness: 48,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: (c) => money(c.parsed.y) } } },
+        scales: { y: { beginAtZero: true, ticks: { callback: moneyTick } } },
+      },
+    });
+
+    // Stacked bars — each shift's takings split (cascaded) by payment method.
+    // Real values: a shift with no sales simply shows no bar.
+    if (D.shift_labels && D.shift_labels.length) {
+      new Chart(document.getElementById("chart-waterfall"), {
+        type: "bar",
+        data: {
+          labels: D.shift_labels,
+          datasets: [
+            { label: "Cash",   data: D.shift_cash,  backgroundColor: "#2563eb" },
+            { label: "M-Pesa", data: D.shift_mpesa, backgroundColor: "#22c55e" },
+            { label: "Bank",   data: D.shift_bank,  backgroundColor: "#f59e0b" },
+          ],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "bottom" },
+            tooltip: { callbacks: {
+              label: (c) => c.dataset.label + ": " + money(c.parsed.y),
+              footer: (items) => "Total " + money(items.reduce((s, i) => s + i.parsed.y, 0)),
+            } },
+          },
+          scales: {
+            x: { stacked: true },
+            y: { stacked: true, beginAtZero: true, ticks: { callback: moneyTick } },
+          },
+        },
+      });
+    }
+  });
+</script>
+
+<!-- ===================== Last vs current shift ===================== -->
+<section class="panel report-panel">
+  <h2>Last vs current shift</h2>
+  {% if current_m %}
+  <div class="cmp-head">
+    <div class="cmp-legend">
+      <span><span class="cmp-dot grey"></span>Last: {% if last_m %}{{ last_m.label }} <span class="muted">({{ last_m.when }})</span>{% else %}—{% endif %}</span>
+      <span><span class="cmp-dot blue"></span>Current: {{ current_m.label }} <span class="muted">({{ current_m.when }}{{ ', open' if current_m.open }})</span></span>
+    </div>
+    {% if delta is not none %}
+    <span class="badge {{ 'badge-receive' if delta >= 0 else 'badge-warn' }}">
+      {{ '▲' if delta >= 0 else '▼' }} {{ '%.1f'|format(delta | abs) }}% vs last
+    </span>
+    {% endif %}
+  </div>
+
+  <div class="chart-wrap"><canvas id="chart-waterfall"></canvas></div>
+  <p class="muted small" style="margin-top:12px">
+    Sales count — Last: <strong>{{ last_m.count if last_m else 0 }}</strong> ·
+    Current: <strong>{{ current_m.count }}</strong>
+  </p>
+  {% else %}
+  <p class="muted">No shifts recorded yet.</p>
+  {% endif %}
+</section>
+
+<!-- ============================ By cashier ============================ -->
+<section class="panel report-panel">
+  <h2>By cashier</h2>
+  <table class="table compact">
+    <thead>
+      <tr><th>Cashier</th><th>Sales</th><th>Cash</th><th>M-Pesa</th><th>Bank</th><th>Total</th></tr>
+    </thead>
+    <tbody>
+      {% for name, r in by_user %}
+      <tr>
+        <td>{{ name }}</td>
+        <td>{{ r.count }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(r.cash) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(r.mpesa) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(r.bank) }}</td>
+        <td><strong>{{ CURRENCY }} {{ '%.2f'|format(r.total) }}</strong></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No sales in this range.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================ By shift ============================ -->
+<section class="panel report-panel" style="margin-top:16px">
+  <h2>By shift</h2>
+  <table class="table compact">
+    <thead>
+      <tr><th>Shift</th><th>Cashier</th><th>Opened</th><th>Closed</th><th>Sales</th><th>Takings</th><th>Expected cash</th></tr>
+    </thead>
+    <tbody>
+      {% for row in shift_rows %}
+      {% set sh = row.shift %}
+      <tr>
+        <td><a class="link" href="{{ url_for('sales', shift=sh.id) }}">#{{ sh.id }}</a> {{ sh.note or '' }}</td>
+        <td>{{ sh.user.name if sh.user else '—' }}</td>
+        <td>{{ sh.opened_at.strftime('%Y-%m-%d %H:%M') if sh.opened_at else '—' }}</td>
+        <td>{% if sh.closed_at %}{{ sh.closed_at.strftime('%Y-%m-%d %H:%M') }}{% else %}<span class="badge badge-warn">open</span>{% endif %}</td>
+        <td>{{ row.summary.count }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(row.summary.total) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(row.summary.expected_cash) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">No shifts in this range.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================ By date ============================ -->
+<section class="panel report-panel" style="margin-top:16px">
+  <h2>By date</h2>
+  <table class="table compact">
+    <thead>
+      <tr><th>Date</th><th>Sales</th><th>Cash</th><th>M-Pesa</th><th>Bank</th><th>Total</th></tr>
+    </thead>
+    <tbody>
+      {% for day, r in by_date %}
+      <tr>
+        <td>{{ day }}</td>
+        <td>{{ r.count }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(r.cash) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(r.mpesa) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(r.bank) }}</td>
+        <td><strong>{{ CURRENCY }} {{ '%.2f'|format(r.total) }}</strong></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No sales in this range.</td></tr>
+      {% endfor %}
+    </tbody>
+    {% if by_date %}
+    <tfoot>
+      <tr class="r-grand">
+        <td>Total</td><td>{{ grand.count }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(grand.cash) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(grand.mpesa) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(grand.bank) }}</td>
+        <td>{{ CURRENCY }} {{ '%.2f'|format(grand.total) }}</td>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+</section>
+{% endblock %}

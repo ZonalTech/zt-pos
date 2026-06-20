@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}POS{% endblock %}
 {% block content %}
+<script>window.HAS_OPEN_SHIFT = {{ 'true' if current_shift else 'false' }};</script>
 <div class="pos-layout">
   <!-- Left: scan + product grid -->
   <section class="pos-scan">
@@ -23,14 +24,16 @@
   <!-- Right: cart -->
   <section class="pos-cart">
     <h2>Cart</h2>
-    <table class="table" id="cart-table">
-      <thead>
-        <tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th></th></tr>
-      </thead>
-      <tbody id="cart-body">
-        <tr class="empty-row"><td colspan="5" class="muted">Cart is empty.</td></tr>
-      </tbody>
-    </table>
+    <div class="cart-scroll">
+      <table class="table" id="cart-table">
+        <thead>
+          <tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th></th></tr>
+        </thead>
+        <tbody id="cart-body">
+          <tr class="empty-row"><td colspan="5" class="muted">Cart is empty.</td></tr>
+        </tbody>
+      </table>
+    </div>
 
     <div class="totals">
       <div class="row"><span>Subtotal</span><span id="t-subtotal">{{ CURRENCY }} 0.00</span></div>
@@ -44,16 +47,14 @@
     <div class="customer-box">
       <div class="customer-head">
         <span>Loyalty customer</span>
-        <span class="muted small">1 pt / {{ CURRENCY }} {{ LOYALTY_KES_PER_POINT | round(0) | int }}</span>
       </div>
       <div id="customer-search" class="customer-search">
-        <input type="tel" id="cust-phone" inputmode="tel" placeholder="Phone number (optional)" autocomplete="off">
+        <div class="cust-picker">
+          <input type="tel" id="cust-phone" inputmode="tel" placeholder="Search by phone…"
+                 autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+          <div id="cust-suggestions" class="cust-suggestions" hidden></div>
+        </div>
         <button class="btn btn-ghost" id="btn-cust-find" type="button">Find</button>
-      </div>
-      <div id="customer-attached" class="customer-attached" hidden>
-        <span id="cust-name" class="cust-name"></span>
-        <span class="muted small"><span id="cust-points">0</span> pts</span>
-        <button class="link link-danger" id="btn-cust-clear" type="button">Remove</button>
       </div>
       <div id="customer-msg" class="customer-msg muted small"></div>
     </div>
@@ -142,18 +143,37 @@
   </div>
 </div>
 
-<!-- Success / receipt prompt -->
-<div class="modal" id="done-modal" hidden>
+{% if not current_shift %}
+<!-- No open shift: prompt the cashier to start one before selling. -->
+<div class="modal" id="start-shift-modal">
   <div class="modal-box center">
-    <div class="big-check">✓</div>
-    <h2>Sale complete</h2>
-    <p id="done-summary" class="muted"></p>
-    <div class="modal-actions center">
-      <a class="btn btn-ghost" id="view-receipt" target="_blank" href="#">View receipt</a>
-      <button class="btn btn-primary" id="btn-new-sale" type="button">New sale</button>
-    </div>
+    <div class="big-check" style="background:rgba(245,158,11,.15);color:#f59e0b">⏱</div>
+    <h2>Start your shift</h2>
+    {% if current_user.assigned_shift or current_user.is_admin %}
+      <p class="muted">
+        {% if current_user.assigned_shift %}Assigned shift: <strong>{{ current_user.assigned_shift }}</strong>.{% endif %}
+        Open a shift to start recording sales.
+      </p>
+      <form method="post" action="{{ url_for('shift_open') }}" class="start-shift-form">
+        <label>Opening cash float</label>
+        <input type="number" name="opening_float" step="0.01" min="0" value="0" autofocus>
+        <div class="modal-actions center">
+          <button class="btn btn-primary" type="submit">Start shift</button>
+          <button class="btn btn-ghost" type="button"
+                  onclick="this.closest('.modal').hidden=true">Later</button>
+        </div>
+      </form>
+    {% else %}
+      <p class="muted">No shift has been assigned to you yet. Ask an administrator
+        to assign your shift on the Users page.</p>
+      <div class="modal-actions center">
+        <button class="btn btn-ghost" type="button"
+                onclick="this.closest('.modal').hidden=true">Close</button>
+      </div>
+    {% endif %}
   </div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
